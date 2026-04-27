@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 
-// Runs automatically after `npm install opencode-autopilot`.
+// Runs automatically after `npm install opencode-openauto`.
 // Patches the user's ~/.config/opencode/{opencode,autopilot}.json so that
 // `router/auto` shows up in the model picker on next opencode launch.
 // Idempotent. Never fails the install — logs a warning and exits 0 on error.
@@ -150,15 +150,19 @@ async function main() {
   // opencode resolves plugins via its own package cache using version
   // specifiers (see ~/.cache/opencode/packages/), NOT via bare names from
   // ~/.config/opencode/node_modules. So we register with a git URL.
-  const PLUGIN_SPEC = "opencode-autopilot@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
-  const plugins = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-  const matchesAutopilot = (p) => {
-    if (typeof p === "string") return p === "opencode-autopilot" || p.startsWith("opencode-autopilot@");
-    return Array.isArray(p) && (p[0] === "opencode-autopilot" || (typeof p[0] === "string" && p[0].startsWith("opencode-autopilot@")));
+  const PLUGIN_SPEC = "opencode-openauto@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
+  let plugins = Array.isArray(opencode.plugin) ? opencode.plugin : [];
+  const isOurs = (p) => {
+    const name = typeof p === "string" ? p : (Array.isArray(p) ? p[0] : "");
+    if (typeof name !== "string") return false;
+    return name === "opencode-openauto"
+      || name === "opencode-autopilot"
+      || name.startsWith("opencode-openauto@")
+      || name.startsWith("opencode-autopilot@");
   };
-  const idx = plugins.findIndex(matchesAutopilot);
-  if (idx >= 0) plugins[idx] = PLUGIN_SPEC;
-  else plugins.push(PLUGIN_SPEC);
+  // Drop ALL prior entries (including the npm name-collision one) and append the canonical git spec.
+  plugins = plugins.filter((p) => !isOurs(p));
+  plugins.push(PLUGIN_SPEC);
   opencode.plugin = plugins;
 
   const provider = (opencode.provider && typeof opencode.provider === "object") ? opencode.provider : {};
@@ -189,19 +193,19 @@ async function main() {
 
   const total = tiers.free.length + tiers["cheap-paid"].length + tiers["top-paid"].length;
   console.log("");
-  console.log("✓ opencode-autopilot installed and configured");
+  console.log("✓ opencode-openauto installed and configured");
   console.log(`  · autopilot.json: ${autopilotPath}`);
   console.log("  · opencode.json patched: plugin + openauto/auto provider");
   console.log(`  · detected models: ${total} (free=${tiers.free.length}, cheap=${tiers["cheap-paid"].length}, top=${tiers["top-paid"].length})`);
   console.log(`  · proxy port: ${port}`);
   console.log("");
   console.log("Next: restart opencode and pick model 'openauto/auto' (search: openauto).");
-  console.log("Customize anytime: opencode-autopilot init  |  opencode-autopilot status");
+  console.log("Customize anytime: opencode-openauto init  |  opencode-openauto status");
   console.log("");
 }
 
 main().catch((err) => {
-  console.warn(`opencode-autopilot postinstall: ${err && err.message ? err.message : err}`);
-  console.warn("(continuing — run `opencode-autopilot init` later to retry)");
+  console.warn(`opencode-openauto postinstall: ${err && err.message ? err.message : err}`);
+  console.warn("(continuing — run `opencode-openauto init` later to retry)");
   process.exit(0);
 });

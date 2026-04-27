@@ -62,7 +62,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, ctx: Pro
   if (req.method === "GET" && (url === "/health" || url === "/")) {
     res.statusCode = 200;
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ ok: true, name: "opencode-autopilot", version: "0.1.0" }));
+    res.end(JSON.stringify({ ok: true, name: "opencode-openauto", version: "0.1.0" }));
     return;
   }
   if (req.method === "GET" && url === "/v1/models") {

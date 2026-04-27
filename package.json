@@ -1,7 +1,7 @@
 {
-  "name": "opencode-autopilot",
+  "name": "opencode-openauto",
   "version": "0.1.0",
-  "description": "Automatic model routing plugin for opencode — picks best LLM per prompt, optimized for cost / quality / balance. Auto-handover on context-window pressure.",
+  "description": "OpenAuto — automatic model routing plugin for opencode. Picks best LLM per prompt, optimized for cost / quality / balance. Auto-handover on context-window pressure.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,6 +12,7 @@
     }
   },
   "bin": {
+    "opencode-openauto": "./dist/cli/index.js",
     "opencode-autopilot": "./dist/cli/index.js"
   },
   "files": [

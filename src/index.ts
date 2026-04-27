@@ -73,7 +73,7 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
     };
 
     if (registry.models.length === 0) {
-      logger.warn("registry empty — autopilot will not route. run `opencode-autopilot init` first.");
+      logger.warn("registry empty — autopilot will not route. run `opencode-openauto init` first.");
     }
 
     if (!proxyHandle) {
@@ -186,4 +186,4 @@ export default plugin;
 export { plugin };
 // opencode 1.14+ expects PluginModule shape: { id?, server }
 export const server = plugin;
-export const id = "opencode-autopilot";
+export const id = "opencode-openauto";

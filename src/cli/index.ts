@@ -48,10 +48,10 @@ async function main(): Promise<void> {
 }
 
 function printHelp(): void {
-  console.log(`opencode-autopilot — automatic model routing for opencode
+  console.log(`opencode-openauto — automatic model routing for opencode
 
 Usage:
-  opencode-autopilot <command>
+  opencode-openauto <command>
 
 Commands:
   init           interactive first-run setup wizard
@@ -70,7 +70,7 @@ Auth:   ${AUTH_PATH}
 }
 
 async function runInit(): Promise<void> {
-  console.log("opencode-autopilot — first-run setup\n");
+  console.log("opencode-openauto — first-run setup\n");
 
   const goal = (await askChoice<Goal>(
     "What is your primary optimization goal?",
@@ -147,7 +147,7 @@ async function runInit(): Promise<void> {
     } catch (err) {
       console.log(`⚠ Could not patch opencode.json: ${(err as Error).message}`);
       console.log("  Add manually:");
-      console.log(`    "plugin": ["opencode-autopilot"],`);
+      console.log(`    "plugin": ["opencode-openauto@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git"],`);
       console.log(`    "provider": { "openauto": { "npm": "@ai-sdk/openai-compatible", "options": { "baseURL": "http://127.0.0.1:${cfg.proxy.port}/v1", "apiKey": "no-auth-needed" }, "models": { "auto": { "name": "OpenAuto" } } } }`);
     }
   }
@@ -183,15 +183,19 @@ async function patchOpencodeJson(port: number): Promise<string> {
   }
   // opencode resolves plugins via its own package cache using version
   // specifiers, not bare names. Use a git URL so it fetches and caches.
-  const PLUGIN_SPEC = "opencode-autopilot@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
-  const plugins = (cfg.plugin as Array<string | [string, unknown]>) ?? [];
-  const matches = (p: string | [string, unknown]) => {
+  const PLUGIN_SPEC = "opencode-openauto@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
+  let plugins = (cfg.plugin as Array<string | [string, unknown]>) ?? [];
+  const isOurs = (p: string | [string, unknown]) => {
     const name = typeof p === "string" ? p : p[0];
-    return name === "opencode-autopilot" || name.startsWith("opencode-autopilot@");
+    return typeof name === "string" && (
+      name === "opencode-openauto" ||
+      name === "opencode-autopilot" ||
+      name.startsWith("opencode-openauto@") ||
+      name.startsWith("opencode-autopilot@")
+    );
   };
-  const idx = plugins.findIndex(matches);
-  if (idx >= 0) plugins[idx] = PLUGIN_SPEC;
-  else plugins.push(PLUGIN_SPEC);
+  plugins = plugins.filter((p) => !isOurs(p));
+  plugins.push(PLUGIN_SPEC);
   cfg.plugin = plugins;
 
   const provider = (cfg.provider as Record<string, unknown>) ?? {};
@@ -224,7 +228,7 @@ async function runStatus(): Promise<void> {
     configuredTiers: cfg.tiers,
   });
 
-  console.log("opencode-autopilot status\n");
+  console.log("opencode-openauto status\n");
   console.log(`Goal:           ${cfg.goal}`);
   console.log(`Badge:          ${cfg.ux.badge ? "on" : "off"}`);
   console.log(`Triage:         ${cfg.triage.enabled ? "on" : "off"}`);
