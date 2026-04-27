@@ -1,4 +1,6 @@
 import type { Plugin, Hooks, PluginInput } from "@opencode-ai/plugin";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { loadConfig, saveConfig } from "./config/store.js";
 import { loadAuth } from "./config/auth.js";
 import { loadOpencodeConfig } from "./config/opencode.js";
@@ -6,8 +8,26 @@ import { buildRegistry } from "./registry/index.js";
 import { startProxy, type ProxyServer } from "./proxy/server.js";
 import { ProxyEventBus, type ProxyContext } from "./proxy/context.js";
 import { logger } from "./util/log.js";
+import { autopilotLogPath } from "./util/paths.js";
 import { getLastHandover, readHandoverDoc } from "./handover/resume.js";
 import type { ModelEntry } from "./types.js";
+
+// Top-level diagnostic: if we see this in autopilot.log, opencode imported our
+// module. If we see "plugin function called" later, opencode also invoked our
+// Plugin function. If both are missing, opencode never loaded the package.
+(() => {
+  try {
+    const path = autopilotLogPath();
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "info",
+      msg: "module imported",
+      pid: process.pid,
+      runtime: typeof (globalThis as unknown as { Bun?: unknown }).Bun !== "undefined" ? "bun" : "node",
+    }) + "\n");
+  } catch { /* never throw at module load */ }
+})();
 
 const ROUTER_PROVIDER_ID = "openauto";
 const ROUTER_MODEL_ID = "auto";
@@ -17,6 +37,15 @@ let autoEnabled = true;
 
 const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
   try {
+    try {
+      const path = autopilotLogPath();
+      appendFileSync(path, JSON.stringify({
+        ts: new Date().toISOString(),
+        level: "info",
+        msg: "plugin function called",
+        pid: process.pid,
+      }) + "\n");
+    } catch { /* */ }
     const [config, auth, opencodeCfg, recentModels] = await Promise.all([
       loadConfig(),
       loadAuth(),
