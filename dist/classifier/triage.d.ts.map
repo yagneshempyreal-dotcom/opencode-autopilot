@@ -1,0 +1,1 @@
+{"version":3,"file":"triage.d.ts","sourceRoot":"","sources":["../../src/classifier/triage.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,gBAAgB,EAAc,UAAU,EAAE,YAAY,EAAE,MAAM,aAAa,CAAC;AAW1F,MAAM,WAAW,WAAW;IAC1B,MAAM,EAAE,MAAM,CAAC;IACf,WAAW,EAAE,UAAU,CAAC;IACxB,IAAI,EAAE,YAAY,CAAC;CACpB;AAED,wBAAsB,WAAW,CAAC,KAAK,EAAE,WAAW,GAAG,OAAO,CAAC,gBAAgB,CAAC,CAiD/E"}
