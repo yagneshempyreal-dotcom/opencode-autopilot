@@ -184,6 +184,4 @@ function pickTriageModel(models: ModelEntry[]): ModelEntry | null {
 
 export default plugin;
 export { plugin };
-// opencode 1.14+ expects PluginModule shape: { id?, server }
 export const server = plugin;
-export const id = "opencode-openauto";
