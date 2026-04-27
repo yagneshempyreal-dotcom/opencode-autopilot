@@ -30,7 +30,7 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
     "prepublishOnly": "tsc && vitest run",
-    "postinstall": "node scripts/postinstall.cjs"
+    "setup": "node scripts/postinstall.cjs"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": ">=1.0.0"
