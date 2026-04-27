@@ -134,7 +134,55 @@ async function runInit(): Promise<void> {
 
   await saveConfig(cfg);
   console.log(`\n✓ Saved ${CONFIG_PATH}`);
-  console.log(`\nNext: add "opencode-autopilot" to your opencode plugin list, then start opencode and pick model 'router/auto'.`);
+
+  const patchOpencode = await askYesNo(
+    "\nPatch ~/.config/opencode/opencode.json to register router/auto provider + plugin?",
+    true,
+  );
+  if (patchOpencode) {
+    try {
+      const path = await patchOpencodeJson(cfg.proxy.port);
+      console.log(`✓ Patched ${path}`);
+    } catch (err) {
+      console.log(`⚠ Could not patch opencode.json: ${(err as Error).message}`);
+      console.log("  Add manually:");
+      console.log(`    "plugin": ["opencode-autopilot"],`);
+      console.log(`    "provider": { "router": { "npm": "@ai-sdk/openai-compatible", "options": { "baseURL": "http://127.0.0.1:${cfg.proxy.port}/v1", "apiKey": "no-auth-needed" }, "models": { "auto": { "name": "Autopilot (auto)" } } } }`);
+    }
+  }
+
+  console.log(`\nNext: start (or restart) opencode and pick model 'router/auto'.`);
+}
+
+async function patchOpencodeJson(port: number): Promise<string> {
+  const { readFile, writeFile, mkdir } = await import("node:fs/promises");
+  const { dirname } = await import("node:path");
+  const { opencodeJsonPath } = await import("../util/paths.js");
+  const path = opencodeJsonPath();
+  let cfg: Record<string, unknown> = {};
+  try {
+    cfg = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (e.code !== "ENOENT") throw err;
+  }
+  const plugins = (cfg.plugin as Array<string | [string, unknown]>) ?? [];
+  const hasPlugin = plugins.some((p) => (typeof p === "string" ? p === "opencode-autopilot" : p[0] === "opencode-autopilot"));
+  if (!hasPlugin) plugins.push("opencode-autopilot");
+  cfg.plugin = plugins;
+
+  const provider = (cfg.provider as Record<string, unknown>) ?? {};
+  provider.router = {
+    npm: "@ai-sdk/openai-compatible",
+    name: "Autopilot Router",
+    options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "no-auth-needed" },
+    models: { auto: { name: "Autopilot (auto)" } },
+  };
+  cfg.provider = provider;
+
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(cfg, null, 2), "utf8");
+  return path;
 }
 
 async function runStatus(): Promise<void> {

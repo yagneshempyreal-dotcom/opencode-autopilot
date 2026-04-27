@@ -15,119 +15,109 @@ const ROUTER_MODEL_ID = "auto";
 let proxyHandle: ProxyServer | null = null;
 let autoEnabled = true;
 
-const plugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
-  const [config, auth, opencodeCfg] = await Promise.all([
-    loadConfig(),
-    loadAuth(),
-    loadOpencodeConfig(),
-  ]);
+const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
+  try {
+    const [config, auth, opencodeCfg] = await Promise.all([
+      loadConfig(),
+      loadAuth(),
+      loadOpencodeConfig(),
+    ]);
 
-  const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg });
-  const triageModel = pickTriageModel(registry.models);
+    const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg });
+    const triageModel = pickTriageModel(registry.models);
 
-  const events = new ProxyEventBus();
-  const ctx: ProxyContext = {
-    config,
-    registry,
-    auth,
-    triageModel,
-    events,
-    autoEnabled: () => autoEnabled,
-    setAutoEnabled: (v) => { autoEnabled = v; },
-  };
+    const events = new ProxyEventBus();
+    const ctx: ProxyContext = {
+      config,
+      registry,
+      auth,
+      triageModel,
+      events,
+      autoEnabled: () => autoEnabled,
+      setAutoEnabled: (v) => { autoEnabled = v; },
+    };
 
-  if (registry.models.length === 0) {
-    logger.warn("registry empty — autopilot will not route. run `opencode-autopilot init` first.");
-  }
-
-  if (!proxyHandle) {
-    try {
-      proxyHandle = await startProxy(ctx);
-      ctx.config.proxy.port = proxyHandle.port;
-      await saveConfig(ctx.config);
-    } catch (err) {
-      logger.error("failed to start proxy", { err: (err as Error).message });
+    if (registry.models.length === 0) {
+      logger.warn("registry empty — autopilot will not route. run `opencode-autopilot init` first.");
     }
-  }
 
-  events.on((e) => {
-    if (e.type === "handover") {
-      logger.info("handover signal", e);
+    if (!proxyHandle) {
+      try {
+        proxyHandle = await startProxy(ctx);
+        ctx.config.proxy.port = proxyHandle.port;
+        await saveConfig(ctx.config);
+        logger.info("autopilot proxy ready", { port: proxyHandle.port });
+      } catch (err) {
+        logger.error("failed to start proxy", { err: (err as Error).message });
+      }
     }
-  });
 
-  const hooks: Hooks = {
-    config: async (cfg) => {
-      if (!proxyHandle) return;
-      const port = proxyHandle.port;
-      const host = ctx.config.proxy.host;
-      const baseURL = `http://${host}:${port}/v1`;
-      cfg.provider = cfg.provider ?? {};
-      const existing = cfg.provider[ROUTER_PROVIDER_ID] ?? {};
-      cfg.provider[ROUTER_PROVIDER_ID] = {
-        ...existing,
-        npm: existing.npm ?? "@ai-sdk/openai-compatible",
-        options: { ...(existing.options ?? {}), baseURL },
-        models: { [ROUTER_MODEL_ID]: { name: "Autopilot (auto)" }, ...(existing.models ?? {}) },
-      } as never;
-    },
+    events.on((e) => {
+      if (e.type === "handover") logger.info("handover signal", e);
+    });
 
-    "chat.message": async (info, output) => {
-      try {
-        const sessionID = info.sessionID;
-        if (!sessionID) return;
-        const parts = output.parts ?? [];
-        const text = parts
-          .map((p) => {
-            const candidate = p as { text?: unknown };
-            return typeof candidate.text === "string" ? candidate.text : "";
-          })
-          .join("\n");
-        if (/\/router\s+resume\b/i.test(text)) {
-          const last = await getLastHandover();
-          if (last) {
-            const doc = await readHandoverDoc(last.path);
-            output.parts.push({ type: "text", text: `\n[router] auto-resume context loaded from ${last.path}\n\n${doc}` } as never);
-          }
+    const hooks: Hooks = {
+      config: async (cfg) => {
+        try {
+          if (!proxyHandle) return;
+          const port = proxyHandle.port;
+          const host = ctx.config.proxy.host;
+          const baseURL = `http://${host}:${port}/v1`;
+          const providerMap = (cfg.provider ?? {}) as Record<string, unknown>;
+          const existing = (providerMap[ROUTER_PROVIDER_ID] ?? {}) as Record<string, unknown>;
+          const existingOptions = (existing.options ?? {}) as Record<string, unknown>;
+          providerMap[ROUTER_PROVIDER_ID] = {
+            ...existing,
+            npm: existing.npm ?? "@ai-sdk/openai-compatible",
+            name: existing.name ?? "Autopilot Router",
+            options: {
+              ...existingOptions,
+              baseURL,
+              apiKey: existingOptions.apiKey ?? "no-auth-needed",
+            },
+            models: {
+              [ROUTER_MODEL_ID]: { name: "Autopilot (auto)" },
+              ...((existing.models as Record<string, unknown>) ?? {}),
+            },
+          };
+          (cfg as { provider?: Record<string, unknown> }).provider = providerMap;
+        } catch (err) {
+          logger.warn("config hook error", { err: (err as Error).message });
         }
-      } catch (err) {
-        logger.warn("chat.message hook error", { err: (err as Error).message });
-      }
-    },
-
-    "experimental.chat.system.transform": async (input, output) => {
-      try {
-        const last = await getLastHandover();
-        if (last && process.env.OPENCODE_AUTOPILOT_AUTO_RESUME === "1") {
-          const doc = await readHandoverDoc(last.path);
-          output.system.unshift(`# Resumed session\n\nThe following handover document captures prior session context. Use it to continue seamlessly.\n\n${doc}`);
-        }
-      } catch (err) {
-        logger.debug("system.transform skip", { err: (err as Error).message });
-      }
-    },
-
-    provider: {
-      id: ROUTER_PROVIDER_ID,
-      models: async () => {
-        return {
-          [ROUTER_MODEL_ID]: {
-            id: ROUTER_MODEL_ID,
-            name: "Autopilot (auto)",
-            release_date: new Date().toISOString().slice(0, 10),
-            attachment: false,
-            cost: { input: 0, output: 0 },
-            limit: { context: 200_000, output: 32_000 },
-            reasoning: false,
-            temperature: true,
-            tool_call: true,
-          } as never,
-        };
       },
-    },
-  };
 
-  return hooks;
+      "chat.message": async (info, output) => {
+        try {
+          if (!info.sessionID) return;
+          const parts = output.parts ?? [];
+          const text = parts
+            .map((p) => {
+              const candidate = p as { text?: unknown };
+              return typeof candidate.text === "string" ? candidate.text : "";
+            })
+            .join("\n");
+          if (/\/router\s+resume\b/i.test(text)) {
+            const last = await getLastHandover();
+            if (last) {
+              const doc = await readHandoverDoc(last.path);
+              const note = `\n[router] auto-resume context loaded from ${last.path}\n\n${doc}`;
+              (output.parts as Array<Record<string, unknown>>).push({ type: "text", text: note });
+            }
+          }
+        } catch (err) {
+          logger.warn("chat.message hook error", { err: (err as Error).message });
+        }
+      },
+    };
+
+    return hooks;
+  } catch (err) {
+    logger.error("plugin init failed (returning empty hooks)", {
+      err: (err as Error).message,
+      stack: (err as Error).stack,
+    });
+    return {};
+  }
 };
 
 function pickTriageModel(models: ModelEntry[]): ModelEntry | null {
