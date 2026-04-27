@@ -11,10 +11,6 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "bin": {
-    "opencode-openauto": "./dist/cli/index.js",
-    "opencode-autopilot": "./dist/cli/index.js"
-  },
   "files": [
     "dist",
     "scripts",
