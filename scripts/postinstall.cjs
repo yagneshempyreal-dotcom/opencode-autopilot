@@ -85,16 +85,37 @@ async function main() {
   const opencode = await readJsonOr(opencodePath, {});
   const existingAutopilot = await readJsonOr(autopilotPath, null);
 
-  // Auto-classify available models from auth × opencode provider config.
+  // Auto-classify models from three sources:
+  //   1. inline declarations in opencode.json provider.<x>.models
+  //   2. recent models picked through opencode (~/.local/state/opencode/model.json)
+  //   3. tier lists already present in autopilot.json (preserve user's curated set)
   const tiers = { free: [], "cheap-paid": [], "top-paid": [] };
+  const seen = new Set();
+  const seed = (provider, modelID) => {
+    if (!provider || !modelID) return;
+    const id = `${provider}/${modelID}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    tiers[classify(id)].push(id);
+  };
+
   const providers = (opencode.provider && typeof opencode.provider === "object") ? opencode.provider : {};
   for (const provider of Object.keys(auth)) {
     const cfgModels = (providers[provider] && providers[provider].models) || {};
-    for (const modelID of Object.keys(cfgModels)) {
-      const id = `${provider}/${modelID}`;
-      tiers[classify(id)].push(id);
-    }
+    for (const modelID of Object.keys(cfgModels)) seed(provider, modelID);
   }
+  // Recent models from opencode's own state.
+  try {
+    const stateDir = process.env.XDG_STATE_HOME
+      ? join(process.env.XDG_STATE_HOME, "opencode")
+      : platform() === "win32" && process.env.LOCALAPPDATA
+        ? join(process.env.LOCALAPPDATA, "opencode")
+        : join(homedir(), ".local", "state", "opencode");
+    const recent = await readJsonOr(join(stateDir, "model.json"), null);
+    if (recent && Array.isArray(recent.recent)) {
+      for (const m of recent.recent) seed(m && m.providerID, m && m.modelID);
+    }
+  } catch { /* ignore */ }
 
   const port = (existingAutopilot && existingAutopilot.proxy && existingAutopilot.proxy.port) || 4317;
 

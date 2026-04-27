@@ -12,6 +12,7 @@ export interface ScanInput {
   auth: OpenCodeAuth;
   opencodeConfig: OpencodeConfig;
   recentModels?: Array<{ providerID: string; modelID: string }>;
+  configuredTiers?: Record<string, string[]>;
 }
 
 const PROVIDER_BASE_URLS: Record<string, string> = {
@@ -60,6 +61,15 @@ function collectSeedModels(input: ScanInput): Array<{ provider: string; modelID:
   }
   if (input.recentModels) {
     for (const m of input.recentModels) out.push({ provider: m.providerID, modelID: m.modelID });
+  }
+  if (input.configuredTiers) {
+    for (const ids of Object.values(input.configuredTiers)) {
+      for (const id of ids) {
+        const slash = id.indexOf("/");
+        if (slash <= 0) continue;
+        out.push({ provider: id.slice(0, slash), modelID: id.slice(slash + 1) });
+      }
+    }
   }
   return out;
 }

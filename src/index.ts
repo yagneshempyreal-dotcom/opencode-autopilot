@@ -17,13 +17,19 @@ let autoEnabled = true;
 
 const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
   try {
-    const [config, auth, opencodeCfg] = await Promise.all([
+    const [config, auth, opencodeCfg, recentModels] = await Promise.all([
       loadConfig(),
       loadAuth(),
       loadOpencodeConfig(),
+      loadRecentModels(),
     ]);
 
-    const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg });
+    const registry = buildRegistry({
+      auth,
+      opencodeConfig: opencodeCfg,
+      recentModels,
+      configuredTiers: config.tiers,
+    });
     const triageModel = pickTriageModel(registry.models);
 
     const events = new ProxyEventBus();
@@ -120,6 +126,22 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
   }
 };
 
+async function loadRecentModels(): Promise<Array<{ providerID: string; modelID: string }>> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    const path = process.env.OPENCODE_MODEL_STATE_PATH ?? join(homedir(), ".local", "state", "opencode", "model.json");
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as { recent?: Array<{ providerID?: string; modelID?: string }> };
+    if (!Array.isArray(parsed.recent)) return [];
+    return parsed.recent
+      .filter((m): m is { providerID: string; modelID: string } => typeof m?.providerID === "string" && typeof m?.modelID === "string");
+  } catch {
+    return [];
+  }
+}
+
 function pickTriageModel(models: ModelEntry[]): ModelEntry | null {
   const free = models.filter((m) => m.tier === "free");
   if (free.length === 0) return null;
@@ -133,3 +155,6 @@ function pickTriageModel(models: ModelEntry[]): ModelEntry | null {
 
 export default plugin;
 export { plugin };
+// opencode 1.14+ expects PluginModule shape: { id?, server }
+export const server = plugin;
+export const id = "opencode-autopilot";

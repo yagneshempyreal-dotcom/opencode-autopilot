@@ -121,4 +121,28 @@ describe("buildRegistry", () => {
     expect(ids).toContain("openai/gpt-5.4");
     expect(ids).toContain("anthropic/claude-haiku-4-5");
   });
+
+  it("seeds from configuredTiers when opencode.json declares no models inline", () => {
+    const reg = buildRegistry({
+      auth: { opencode: { type: "wellknown", key: "k" }, openai: { type: "api", key: "k" } },
+      opencodeConfig: {},
+      configuredTiers: {
+        free: ["opencode/nemotron-3-super-free", "opencode/minimax-m2.5-free"],
+        "cheap-paid": ["openai/gpt-5.4-mini"],
+        "top-paid": ["openai/gpt-5.4"],
+      },
+    });
+    expect(reg.models.length).toBe(4);
+    const free = reg.models.filter((m) => m.tier === "free");
+    expect(free.length).toBe(2);
+  });
+
+  it("ignores configuredTiers entries without slash separator", () => {
+    const reg = buildRegistry({
+      auth: {},
+      opencodeConfig: {},
+      configuredTiers: { free: ["bad-entry-no-slash"] } as Record<string, string[]>,
+    });
+    expect(reg.models).toHaveLength(0);
+  });
 });

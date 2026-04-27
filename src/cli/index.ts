@@ -78,10 +78,11 @@ async function runInit(): Promise<void> {
     2,
   )) as Goal;
 
-  console.log("\nScanning available models from opencode auth and config…");
+  console.log("\nScanning available models from opencode auth, config, and recent state…");
   const auth = await loadAuth();
   const opencodeCfg = await loadOpencodeConfig();
-  const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg });
+  const recentModels = await loadRecentModelsCli();
+  const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg, recentModels });
 
   if (registry.models.length === 0) {
     console.log("\n  ⚠ no models detected. Make sure you have run `opencode auth login <provider>` for at least one provider.");
@@ -154,6 +155,20 @@ async function runInit(): Promise<void> {
   console.log(`\nNext: start (or restart) opencode and pick model 'openauto/auto'.`);
 }
 
+async function loadRecentModelsCli(): Promise<Array<{ providerID: string; modelID: string }>> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const { homedir } = await import("node:os");
+    const { join } = await import("node:path");
+    const path = process.env.OPENCODE_MODEL_STATE_PATH ?? join(homedir(), ".local", "state", "opencode", "model.json");
+    const raw = await readFile(path, "utf8");
+    const parsed = JSON.parse(raw) as { recent?: Array<{ providerID?: string; modelID?: string }> };
+    if (!Array.isArray(parsed.recent)) return [];
+    return parsed.recent.filter((m): m is { providerID: string; modelID: string } =>
+      typeof m?.providerID === "string" && typeof m?.modelID === "string");
+  } catch { return []; }
+}
+
 async function patchOpencodeJson(port: number): Promise<string> {
   const { readFile, writeFile, mkdir } = await import("node:fs/promises");
   const { dirname } = await import("node:path");
@@ -193,7 +208,13 @@ async function runStatus(): Promise<void> {
   const cfg = await loadConfig();
   const auth = await loadAuth();
   const opencodeCfg = await loadOpencodeConfig();
-  const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg });
+  const recentModels = await loadRecentModelsCli();
+  const registry = buildRegistry({
+    auth,
+    opencodeConfig: opencodeCfg,
+    recentModels,
+    configuredTiers: cfg.tiers,
+  });
 
   console.log("opencode-autopilot status\n");
   console.log(`Goal:           ${cfg.goal}`);
@@ -214,7 +235,13 @@ async function runTiers(): Promise<void> {
   const cfg = await loadConfig();
   const auth = await loadAuth();
   const opencodeCfg = await loadOpencodeConfig();
-  const registry = buildRegistry({ auth, opencodeConfig: opencodeCfg });
+  const recentModels = await loadRecentModelsCli();
+  const registry = buildRegistry({
+    auth,
+    opencodeConfig: opencodeCfg,
+    recentModels,
+    configuredTiers: cfg.tiers,
+  });
   cfg.tiers = {
     free: registry.models.filter((m) => m.tier === "free").map((m) => `${m.provider}/${m.modelID}`),
     "cheap-paid": registry.models.filter((m) => m.tier === "cheap-paid").map((m) => `${m.provider}/${m.modelID}`),
