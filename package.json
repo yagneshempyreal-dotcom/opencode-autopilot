@@ -32,18 +32,8 @@
     "prepublishOnly": "tsc && vitest run",
     "setup": "node scripts/postinstall.cjs"
   },
-  "dependencies": {
-    "@ai-sdk/openai-compatible": ">=1.0.0"
-  },
-  "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.4.0",
-    "@opencode-ai/sdk": ">=1.4.0"
-  },
-  "peerDependenciesMeta": {
-    "@opencode-ai/plugin": { "optional": false },
-    "@opencode-ai/sdk": { "optional": false }
-  },
   "devDependencies": {
+    "@ai-sdk/openai-compatible": ">=1.0.0",
     "@opencode-ai/plugin": "1.4.3",
     "@opencode-ai/sdk": "1.4.3",
     "@types/node": "^22.0.0",
