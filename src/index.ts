@@ -9,7 +9,7 @@ import { logger } from "./util/log.js";
 import { getLastHandover, readHandoverDoc } from "./handover/resume.js";
 import type { ModelEntry } from "./types.js";
 
-const ROUTER_PROVIDER_ID = "router";
+const ROUTER_PROVIDER_ID = "openauto";
 const ROUTER_MODEL_ID = "auto";
 
 let proxyHandle: ProxyServer | null = null;
@@ -69,14 +69,14 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
           providerMap[ROUTER_PROVIDER_ID] = {
             ...existing,
             npm: existing.npm ?? "@ai-sdk/openai-compatible",
-            name: existing.name ?? "Autopilot Router",
+            name: existing.name ?? "OpenAuto Router",
             options: {
               ...existingOptions,
               baseURL,
               apiKey: existingOptions.apiKey ?? "no-auth-needed",
             },
             models: {
-              [ROUTER_MODEL_ID]: { name: "Autopilot (auto)" },
+              [ROUTER_MODEL_ID]: { name: "OpenAuto" },
               ...((existing.models as Record<string, unknown>) ?? {}),
             },
           };

@@ -136,7 +136,7 @@ async function runInit(): Promise<void> {
   console.log(`\n✓ Saved ${CONFIG_PATH}`);
 
   const patchOpencode = await askYesNo(
-    "\nPatch ~/.config/opencode/opencode.json to register router/auto provider + plugin?",
+    "\nPatch ~/.config/opencode/opencode.json to register openauto/auto provider + plugin?",
     true,
   );
   if (patchOpencode) {
@@ -147,11 +147,11 @@ async function runInit(): Promise<void> {
       console.log(`⚠ Could not patch opencode.json: ${(err as Error).message}`);
       console.log("  Add manually:");
       console.log(`    "plugin": ["opencode-autopilot"],`);
-      console.log(`    "provider": { "router": { "npm": "@ai-sdk/openai-compatible", "options": { "baseURL": "http://127.0.0.1:${cfg.proxy.port}/v1", "apiKey": "no-auth-needed" }, "models": { "auto": { "name": "Autopilot (auto)" } } } }`);
+      console.log(`    "provider": { "openauto": { "npm": "@ai-sdk/openai-compatible", "options": { "baseURL": "http://127.0.0.1:${cfg.proxy.port}/v1", "apiKey": "no-auth-needed" }, "models": { "auto": { "name": "OpenAuto" } } } }`);
     }
   }
 
-  console.log(`\nNext: start (or restart) opencode and pick model 'router/auto'.`);
+  console.log(`\nNext: start (or restart) opencode and pick model 'openauto/auto'.`);
 }
 
 async function patchOpencodeJson(port: number): Promise<string> {
@@ -172,11 +172,15 @@ async function patchOpencodeJson(port: number): Promise<string> {
   cfg.plugin = plugins;
 
   const provider = (cfg.provider as Record<string, unknown>) ?? {};
-  provider.router = {
+  if ((provider as { router?: unknown }).router && !(provider as { openauto?: unknown }).openauto) {
+    (provider as { openauto: unknown }).openauto = (provider as { router: unknown }).router;
+    delete (provider as { router?: unknown }).router;
+  }
+  (provider as { openauto: unknown }).openauto = {
     npm: "@ai-sdk/openai-compatible",
-    name: "Autopilot Router",
+    name: "OpenAuto Router",
     options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "no-auth-needed" },
-    models: { auto: { name: "Autopilot (auto)" } },
+    models: { auto: { name: "OpenAuto" } },
   };
   cfg.provider = provider;
 

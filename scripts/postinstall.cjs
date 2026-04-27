@@ -134,18 +134,25 @@ async function main() {
   opencode.plugin = plugins;
 
   const provider = (opencode.provider && typeof opencode.provider === "object") ? opencode.provider : {};
-  if (!provider.router) {
-    provider.router = {
+  // Migrate legacy "router" key to "openauto".
+  if (provider.router && !provider.openauto) {
+    provider.openauto = provider.router;
+    delete provider.router;
+  }
+  if (!provider.openauto) {
+    provider.openauto = {
       npm: "@ai-sdk/openai-compatible",
-      name: "Autopilot Router",
+      name: "OpenAuto Router",
       options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "no-auth-needed" },
-      models: { auto: { name: "Autopilot (auto)" } },
+      models: { auto: { name: "OpenAuto" } },
     };
   } else {
-    // Update baseURL only if port changed.
-    provider.router.options = provider.router.options || {};
-    provider.router.options.baseURL = `http://127.0.0.1:${port}/v1`;
-    provider.router.options.apiKey = provider.router.options.apiKey || "no-auth-needed";
+    provider.openauto.options = provider.openauto.options || {};
+    provider.openauto.options.baseURL = `http://127.0.0.1:${port}/v1`;
+    provider.openauto.options.apiKey = provider.openauto.options.apiKey || "no-auth-needed";
+    provider.openauto.npm = provider.openauto.npm || "@ai-sdk/openai-compatible";
+    provider.openauto.name = provider.openauto.name || "OpenAuto Router";
+    provider.openauto.models = provider.openauto.models || { auto: { name: "OpenAuto" } };
   }
   opencode.provider = provider;
 
@@ -156,11 +163,11 @@ async function main() {
   console.log("");
   console.log("✓ opencode-autopilot installed and configured");
   console.log(`  · autopilot.json: ${autopilotPath}`);
-  console.log("  · opencode.json patched: plugin + router/auto provider");
+  console.log("  · opencode.json patched: plugin + openauto/auto provider");
   console.log(`  · detected models: ${total} (free=${tiers.free.length}, cheap=${tiers["cheap-paid"].length}, top=${tiers["top-paid"].length})`);
   console.log(`  · proxy port: ${port}`);
   console.log("");
-  console.log("Next: restart opencode and pick model 'router/auto'.");
+  console.log("Next: restart opencode and pick model 'openauto/auto' (search: openauto).");
   console.log("Customize anytime: opencode-autopilot init  |  opencode-autopilot status");
   console.log("");
 }

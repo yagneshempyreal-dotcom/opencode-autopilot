@@ -278,7 +278,7 @@ function makeBadgeChunk(badge: string): string | null {
       id: `chatcmpl-router-${Date.now()}`,
       object: "chat.completion.chunk",
       created: Math.floor(Date.now() / 1000),
-      model: "router/auto",
+      model: "openauto/auto",
       choices: [
         {
           index: 0,
