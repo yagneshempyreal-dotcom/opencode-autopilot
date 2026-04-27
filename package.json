@@ -16,6 +16,7 @@
   },
   "files": [
     "dist",
+    "scripts",
     "README.md",
     "LICENSE"
   ],
@@ -28,7 +29,8 @@
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
     "prepare": "tsc",
-    "prepublishOnly": "tsc && vitest run"
+    "prepublishOnly": "tsc && vitest run",
+    "postinstall": "node scripts/postinstall.cjs"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.4.0",
