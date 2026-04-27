@@ -1,0 +1,316 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { logger } from "../util/log.js";
+import { classify } from "../classifier/index.js";
+import { decide, bumpStickyFloor } from "../policy/index.js";
+import { dispatch } from "../forwarder/index.js";
+import { findModel } from "../registry/index.js";
+import { parseRequest } from "./parse.js";
+import { sseLines, extractDeltaText, extractUsage } from "./sse.js";
+import { formatBadge } from "../badge/format.js";
+import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
+import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
+import type { ProxyContext } from "./context.js";
+import type { ChatCompletionRequest } from "../types.js";
+
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+
+export async function handleChatCompletions(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: ProxyContext,
+): Promise<void> {
+  const raw = await readJSON(req).catch((err) => {
+    fail(res, 400, `invalid JSON: ${(err as Error).message}`);
+    return null;
+  });
+  if (!raw) return;
+
+  const request = raw as ChatCompletionRequest;
+  if (!request.messages || !Array.isArray(request.messages) || request.messages.length === 0) {
+    fail(res, 400, "missing or empty messages");
+    return;
+  }
+  if (!request.messages.some((m) => m && (m.role === "user" || m.role === "system" || m.role === "assistant" || m.role === "tool"))) {
+    fail(res, 400, "no valid message roles");
+    return;
+  }
+
+  const sessionHeader = (req.headers["x-session-id"] as string | undefined) ?? null;
+  const parsed = parseRequest(request, sessionHeader);
+  const session = getSession(parsed.sessionID);
+
+  if (parsed.signals.reset) resetStickyFloor(parsed.sessionID);
+  if (parsed.signals.autoOff) ctx.setAutoEnabled(false);
+  if (parsed.signals.autoOn) ctx.setAutoEnabled(true);
+
+  if (!ctx.autoEnabled() && !parsed.override) {
+    fail(res, 503, "router disabled (/auto off). Re-enable with /auto on.");
+    return;
+  }
+
+  const triageEnabled = ctx.config.triage.enabled && !!ctx.triageModel;
+
+  const classification = await classify({
+    messages: parsed.request.messages,
+    goal: ctx.config.goal,
+    triageEnabled,
+    triageModel: ctx.triageModel,
+    auth: ctx.auth,
+  });
+
+  const wouldBeTier = (() => {
+    const matrix: Record<string, Record<string, string>> = {
+      cost: { low: "free", medium: "free", high: "cheap-paid" },
+      balance: { low: "free", medium: "cheap-paid", high: "top-paid" },
+      quality: { low: "cheap-paid", medium: "top-paid", high: "top-paid" },
+      custom: { low: "free", medium: "cheap-paid", high: "top-paid" },
+    };
+    const row = matrix[ctx.config.goal] ?? matrix.balance;
+    return (row?.[classification.tier] ?? "cheap-paid") as "free" | "cheap-paid" | "top-paid";
+  })();
+
+  const stickyBumpedTo = parsed.signals.upgradeRequested
+    ? bumpStickyFloor(session.stickyFloor, wouldBeTier)
+    : null;
+  if (stickyBumpedTo) setStickyFloor(parsed.sessionID, stickyBumpedTo);
+
+  const estimatedTokens = estimateRequestTokens(parsed.request.messages);
+
+  const decision = decide({
+    classification,
+    config: ctx.config,
+    registry: ctx.registry,
+    stickyFloor: getSession(parsed.sessionID).stickyFloor,
+    override: parsed.override,
+    estimatedTokens,
+  });
+
+  if (!decision) {
+    fail(res, 503, "no model available in any tier");
+    ctx.events.emit({ type: "error", sessionID: parsed.sessionID, message: "no model available" });
+    return;
+  }
+
+  const targetModel = findModel(ctx.registry, `${decision.provider}/${decision.modelID}`);
+  if (!targetModel) {
+    fail(res, 500, `chosen model not in registry: ${decision.modelID}`);
+    return;
+  }
+
+  ctx.events.emit({
+    type: "route",
+    sessionID: parsed.sessionID,
+    modelID: decision.modelID,
+    tier: decision.tier,
+    escalated: decision.escalated,
+  });
+  if (stickyBumpedTo) {
+    ctx.events.emit({
+      type: "sticky-bump",
+      sessionID: parsed.sessionID,
+      from: session.stickyFloor,
+      to: stickyBumpedTo,
+    });
+  }
+
+  const utilization = estimatedTokens / Math.max(targetModel.ctxWindow, 1);
+  const warnHandover = utilization >= ctx.config.handover.thresholdWarn;
+  if (warnHandover) {
+    ctx.events.emit({ type: "ctx", sessionID: parsed.sessionID, utilization, modelID: decision.modelID });
+  }
+  const triggerHandover = ctx.config.handover.enabled && utilization >= ctx.config.handover.thresholdSave;
+  if (triggerHandover) {
+    ctx.events.emit({ type: "handover", sessionID: parsed.sessionID, reason: `utilization ${utilization.toFixed(2)}` });
+  }
+
+  const badge = ctx.config.ux.badge
+    ? formatBadge({
+        decision,
+        ctxUtilization: utilization,
+        warnHandover,
+        stickyBumpedTo,
+      })
+    : null;
+
+  const stream = parsed.request.stream ?? false;
+  parsed.request.stream = stream;
+
+  let dispatchResult;
+  try {
+    dispatchResult = await dispatch({
+      decision,
+      request: parsed.request,
+      registry: ctx.registry,
+      auth: ctx.auth,
+      allowEscalation: !parsed.override,
+    });
+  } catch (err) {
+    logger.error("dispatch failed", { err: (err as Error).message });
+    fail(res, 502, `dispatch failed: ${(err as Error).message}`);
+    return;
+  }
+
+  res.statusCode = dispatchResult.status;
+  const HOP_BY_HOP = new Set([
+    "transfer-encoding",
+    "content-encoding",
+    "content-length",
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "upgrade",
+  ]);
+  for (const [k, v] of Object.entries(dispatchResult.headers)) {
+    if (HOP_BY_HOP.has(k.toLowerCase())) continue;
+    res.setHeader(k, v);
+  }
+
+  const responseContentType = (dispatchResult.headers["content-type"] ?? dispatchResult.headers["Content-Type"] ?? "").toLowerCase();
+  const isStream = responseContentType.includes("text/event-stream") || (parsed.request.stream === true && responseContentType === "");
+
+  if (typeof dispatchResult.body === "string") {
+    const enriched = badge && isJSON(responseContentType)
+      ? prependBadgeToJSON(dispatchResult.body, badge)
+      : dispatchResult.body;
+    res.end(enriched);
+    const inferredOut = estimateStringTokens(dispatchResult.body);
+    recordUsage(parsed.sessionID, estimatedTokens, inferredOut, decision.modelID);
+    return;
+  }
+
+  if (isStream) {
+    await streamThrough(res, dispatchResult.body, badge, parsed.sessionID, decision.modelID, estimatedTokens);
+    return;
+  }
+
+  await passThroughJSON(res, dispatchResult.body, badge, parsed.sessionID, decision.modelID, estimatedTokens);
+}
+
+function isJSON(ct: string): boolean {
+  return ct.includes("application/json") || ct.includes("text/json");
+}
+
+async function passThroughJSON(
+  res: ServerResponse,
+  body: ReadableStream<Uint8Array>,
+  badge: string | null,
+  sessionID: string,
+  modelID: string,
+  estimatedIn: number,
+): Promise<void> {
+  const chunks: Buffer[] = [];
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  const enriched = badge ? prependBadgeToJSON(text, badge) : text;
+  res.end(enriched);
+
+  let outTokens = estimateStringTokens(text);
+  let usageIn = estimatedIn;
+  let usageOut = outTokens;
+  try {
+    const parsed = JSON.parse(text) as { usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    if (parsed.usage) {
+      usageIn = parsed.usage.prompt_tokens ?? usageIn;
+      usageOut = parsed.usage.completion_tokens ?? usageOut;
+    }
+  } catch { /* not JSON */ }
+  recordUsage(sessionID, usageIn, usageOut, modelID);
+}
+
+async function readJSON(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buf.length;
+    if (total > MAX_REQUEST_BYTES) throw new Error("request too large");
+    chunks.push(buf);
+  }
+  const text = Buffer.concat(chunks).toString("utf8");
+  if (!text) throw new Error("empty body");
+  return JSON.parse(text);
+}
+
+function fail(res: ServerResponse, status: number, message: string): void {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify({ error: { message } }));
+}
+
+async function streamThrough(
+  res: ServerResponse,
+  body: ReadableStream<Uint8Array>,
+  badge: string | null,
+  sessionID: string,
+  modelID: string,
+  estimatedIn: number,
+): Promise<void> {
+  let badgeSent = false;
+  let outTokens = 0;
+  let usageReported = false;
+
+  for await (const line of sseLines(body)) {
+    if (!badgeSent && badge && line.startsWith("data:")) {
+      const inject = makeBadgeChunk(badge);
+      if (inject) res.write(`data: ${inject}\n\n`);
+      badgeSent = true;
+    }
+    res.write(`${line}\n`);
+    const delta = extractDeltaText(line);
+    if (delta) outTokens += estimateStringTokens(delta);
+    const usage = extractUsage(line);
+    if (usage) {
+      recordUsage(sessionID, usage.in, usage.out, modelID);
+      usageReported = true;
+    }
+  }
+  if (!usageReported) recordUsage(sessionID, estimatedIn, outTokens, modelID);
+  res.end();
+}
+
+function makeBadgeChunk(badge: string): string | null {
+  try {
+    return JSON.stringify({
+      id: `chatcmpl-router-${Date.now()}`,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: "router/auto",
+      choices: [
+        {
+          index: 0,
+          delta: { role: "assistant", content: `${badge}\n` },
+          finish_reason: null,
+        },
+      ],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function prependBadgeToJSON(json: string, badge: string): string {
+  try {
+    const parsed = JSON.parse(json) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const c = parsed.choices?.[0]?.message;
+    if (c && typeof c.content === "string") {
+      c.content = `${badge}\n${c.content}`;
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return json;
+  }
+}

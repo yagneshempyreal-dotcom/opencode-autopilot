@@ -1,0 +1,42 @@
+{
+  "model": "router/auto",
+  "provider": {
+    "openai": {
+      "models": {
+        "gpt-5.4": {},
+        "gpt-5.4-mini": {}
+      }
+    },
+    "anthropic": {
+      "models": {
+        "claude-opus-4-7": { "ctx": 200000 },
+        "claude-haiku-4-5": {}
+      }
+    },
+    "openrouter": {
+      "models": {
+        "google/gemma-4-26b-a4b-it:free": {},
+        "x-ai/grok-code-fast-1": {}
+      }
+    },
+    "deepseek": {
+      "models": {
+        "deepseek-reasoner": {}
+      }
+    },
+    "zhipuai": {
+      "npm": "@anthropic-ai/sdk",
+      "options": { "baseURL": "https://open.bigmodel.cn/api/paas/v4" },
+      "models": {
+        "glm-4-plus": {},
+        "glm-4.5": {}
+      }
+    },
+    "opencode": {
+      "models": {
+        "nemotron-3-super-free": {},
+        "minimax-m2.5-free": {}
+      }
+    }
+  }
+}

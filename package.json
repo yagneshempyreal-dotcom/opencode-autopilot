@@ -1,0 +1,66 @@
+{
+  "name": "opencode-autopilot",
+  "version": "0.1.0",
+  "description": "Automatic model routing plugin for opencode — picks best LLM per prompt, optimized for cost / quality / balance. Auto-handover on context-window pressure.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "opencode-autopilot": "./dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.4.0",
+    "@opencode-ai/sdk": ">=1.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": { "optional": false },
+    "@opencode-ai/sdk": { "optional": false }
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.4.3",
+    "@opencode-ai/sdk": "1.4.3",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "llm",
+    "router",
+    "model-routing",
+    "ai",
+    "anthropic",
+    "openai",
+    "openrouter"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git"
+  }
+}
