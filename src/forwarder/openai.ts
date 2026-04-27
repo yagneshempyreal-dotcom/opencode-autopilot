@@ -45,7 +45,7 @@ export async function forwardOpenAICompat(input: ForwardInput): Promise<ForwardR
   return {
     status: res.status,
     headers: responseHeaders,
-    body: res.body ?? "",
+    body: res.body,
     modelUsed: model,
   };
 }

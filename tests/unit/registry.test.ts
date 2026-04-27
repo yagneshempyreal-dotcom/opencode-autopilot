@@ -105,4 +105,20 @@ describe("buildRegistry", () => {
     expect(reg.models).toHaveLength(0);
     expect(reg.flagged).toHaveLength(0);
   });
+
+  it("includes recentModels even when not in auth or config", () => {
+    const reg = buildRegistry({
+      auth: {},
+      opencodeConfig: {},
+      recentModels: [
+        { providerID: "openai", modelID: "gpt-5.4" },
+        { providerID: "openai", modelID: "gpt-5.4" }, // dedup
+        { providerID: "anthropic", modelID: "claude-haiku-4-5" },
+      ],
+    });
+    expect(reg.models.length).toBe(2);
+    const ids = reg.models.map((m) => `${m.provider}/${m.modelID}`);
+    expect(ids).toContain("openai/gpt-5.4");
+    expect(ids).toContain("anthropic/claude-haiku-4-5");
+  });
 });

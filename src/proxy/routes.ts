@@ -171,13 +171,9 @@ export async function handleChatCompletions(
   const responseContentType = (dispatchResult.headers["content-type"] ?? dispatchResult.headers["Content-Type"] ?? "").toLowerCase();
   const isStream = responseContentType.includes("text/event-stream") || (parsed.request.stream === true && responseContentType === "");
 
-  if (typeof dispatchResult.body === "string") {
-    const enriched = badge && isJSON(responseContentType)
-      ? prependBadgeToJSON(dispatchResult.body, badge)
-      : dispatchResult.body;
-    res.end(enriched);
-    const inferredOut = estimateStringTokens(dispatchResult.body);
-    recordUsage(parsed.sessionID, estimatedTokens, inferredOut, decision.modelID);
+  if (!dispatchResult.body) {
+    res.end();
+    recordUsage(parsed.sessionID, estimatedTokens, 0, decision.modelID);
     return;
   }
 
@@ -187,10 +183,6 @@ export async function handleChatCompletions(
   }
 
   await passThroughJSON(res, dispatchResult.body, badge, parsed.sessionID, decision.modelID, estimatedTokens);
-}
-
-function isJSON(ct: string): boolean {
-  return ct.includes("application/json") || ct.includes("text/json");
 }
 
 async function passThroughJSON(

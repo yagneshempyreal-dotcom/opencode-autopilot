@@ -1,6 +1,6 @@
 # opencode-autopilot
 
-[![tests](https://img.shields.io/badge/tests-139%20passing-brightgreen)](./tests) [![coverage](https://img.shields.io/badge/coverage-89%25-brightgreen)](./tests) [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![tests](https://img.shields.io/badge/tests-214%20passing-brightgreen)](./tests) [![coverage](https://img.shields.io/badge/coverage-99.47%25-brightgreen)](./tests) [![functions](https://img.shields.io/badge/functions-100%25-brightgreen)](./tests) [![license](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 Automatic model routing plugin for [opencode](https://opencode.ai). Picks the best available LLM per prompt — free or paid — optimized for your chosen goal: **cost**, **quality**, or **balance**. Handles auto-handover when a session approaches the model's context-window limit.
 
@@ -158,7 +158,7 @@ Manual QA checklist: [`tests/manual.md`](tests/manual.md).
 - [x] Setup CLI with first-run wizard
 - [x] Context monitor + handover generator + resume
 - [x] Cross-platform path resolution (XDG / Windows APPDATA)
-- [x] 139 automated tests, 89% coverage
+- [x] 214 automated tests · 99.47% line coverage · 100% function coverage
 
 ## License
 

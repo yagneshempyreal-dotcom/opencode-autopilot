@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { heuristicScore, extractHeuristicInput } from "../../src/classifier/heuristic.js";
+import { heuristicScore, extractHeuristicInput, lastUserMessage } from "../../src/classifier/heuristic.js";
 
 describe("heuristicScore", () => {
   it("rates very short trivial prompts as low", () => {
@@ -121,5 +121,19 @@ describe("extractHeuristicInput", () => {
     ]);
     expect(input.prompt).toContain("hello");
     expect(input.prompt).toContain("world");
+  });
+
+  it("lastUserMessage returns null when no user message exists", () => {
+    expect(lastUserMessage([])).toBeNull();
+    expect(lastUserMessage([{ role: "system", content: "x" }])).toBeNull();
+  });
+
+  it("lastUserMessage returns latest user message", () => {
+    const last = lastUserMessage([
+      { role: "user", content: "first" },
+      { role: "assistant", content: "reply" },
+      { role: "user", content: "latest" },
+    ]);
+    expect(last?.content).toBe("latest");
   });
 });

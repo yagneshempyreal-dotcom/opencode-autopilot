@@ -57,7 +57,7 @@ export async function forwardAnthropic(input: ForwardInput): Promise<ForwardResu
   return {
     status: res.status,
     headers: responseHeaders,
-    body: res.body ?? "",
+    body: res.body,
     modelUsed: model,
   };
 }

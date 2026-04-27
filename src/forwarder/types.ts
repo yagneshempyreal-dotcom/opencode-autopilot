@@ -10,7 +10,7 @@ export interface ForwardInput {
 export interface ForwardResult {
   status: number;
   headers: Record<string, string>;
-  body: ReadableStream<Uint8Array> | string;
+  body: ReadableStream<Uint8Array> | null;
   modelUsed: ModelEntry;
 }
 
