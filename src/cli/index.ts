@@ -181,9 +181,17 @@ async function patchOpencodeJson(port: number): Promise<string> {
     const e = err as NodeJS.ErrnoException;
     if (e.code !== "ENOENT") throw err;
   }
+  // opencode resolves plugins via its own package cache using version
+  // specifiers, not bare names. Use a git URL so it fetches and caches.
+  const PLUGIN_SPEC = "opencode-autopilot@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
   const plugins = (cfg.plugin as Array<string | [string, unknown]>) ?? [];
-  const hasPlugin = plugins.some((p) => (typeof p === "string" ? p === "opencode-autopilot" : p[0] === "opencode-autopilot"));
-  if (!hasPlugin) plugins.push("opencode-autopilot");
+  const matches = (p: string | [string, unknown]) => {
+    const name = typeof p === "string" ? p : p[0];
+    return name === "opencode-autopilot" || name.startsWith("opencode-autopilot@");
+  };
+  const idx = plugins.findIndex(matches);
+  if (idx >= 0) plugins[idx] = PLUGIN_SPEC;
+  else plugins.push(PLUGIN_SPEC);
   cfg.plugin = plugins;
 
   const provider = (cfg.provider as Record<string, unknown>) ?? {};

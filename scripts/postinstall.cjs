@@ -146,12 +146,19 @@ async function main() {
   await mkdir(dirname(autopilotPath), { recursive: true });
   await writeFile(autopilotPath, JSON.stringify(autopilotCfg, null, 2), "utf8");
 
-  // Patch opencode.json: add plugin + router provider (idempotent).
+  // Patch opencode.json: add plugin + provider (idempotent).
+  // opencode resolves plugins via its own package cache using version
+  // specifiers (see ~/.cache/opencode/packages/), NOT via bare names from
+  // ~/.config/opencode/node_modules. So we register with a git URL.
+  const PLUGIN_SPEC = "opencode-autopilot@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
   const plugins = Array.isArray(opencode.plugin) ? opencode.plugin : [];
-  const hasPlugin = plugins.some((p) =>
-    typeof p === "string" ? p === "opencode-autopilot" : Array.isArray(p) && p[0] === "opencode-autopilot",
-  );
-  if (!hasPlugin) plugins.push("opencode-autopilot");
+  const matchesAutopilot = (p) => {
+    if (typeof p === "string") return p === "opencode-autopilot" || p.startsWith("opencode-autopilot@");
+    return Array.isArray(p) && (p[0] === "opencode-autopilot" || (typeof p[0] === "string" && p[0].startsWith("opencode-autopilot@")));
+  };
+  const idx = plugins.findIndex(matchesAutopilot);
+  if (idx >= 0) plugins[idx] = PLUGIN_SPEC;
+  else plugins.push(PLUGIN_SPEC);
   opencode.plugin = plugins;
 
   const provider = (opencode.provider && typeof opencode.provider === "object") ? opencode.provider : {};

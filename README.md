@@ -39,25 +39,22 @@ Full design at [`docs/specs/2026-04-27-opencode-autopilot-design.md`](docs/specs
 
 ## Install
 
-```bash
-npm install -g opencode-autopilot
-```
-
-Add to `~/.config/opencode/opencode.json`:
-
-```json
-{
-  "plugin": ["opencode-autopilot"]
-}
-```
-
-Run the wizard:
+The simplest path — install once, opencode resolves the plugin from its own package cache using a git specifier. The postinstall script auto-patches your `opencode.json` so you don't have to.
 
 ```bash
-opencode-autopilot init
+cd ~/.config/opencode
+npm install github:yagneshempyreal-dotcom/opencode-autopilot
 ```
 
-Open opencode, pick model `router/auto`, and start prompting.
+That single command:
+- Installs the plugin into opencode's reachable node_modules
+- Auto-patches `~/.config/opencode/opencode.json` to add the plugin (with git specifier — opencode requires this to load via its package cache) and the `openauto` provider
+- Auto-classifies your existing models from `auth.json` + `opencode.json` into free / cheap-paid / top-paid
+- Writes `~/.config/opencode/autopilot.json` with sensible defaults (goal=balance)
+
+Then **restart opencode** and pick model `openauto/auto` from the picker.
+
+> **Why a git URL and not a bare name?** opencode loads plugins via its own package cache (`~/.cache/opencode/packages/`) keyed by version specifier, not via Node's `require` resolution from `~/.config/opencode/node_modules`. A bare plugin name in `opencode.json` is silently ignored.
 
 ## CLI
 
