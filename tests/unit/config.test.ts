@@ -71,14 +71,20 @@ describe("auth", () => {
   });
 
   it("getCredential + bearerToken extract correctly", () => {
+    const farFuture = Date.now() + 60 * 60 * 1000;
     const auth = {
       openai: { type: "api" as const, key: "sk-1" },
-      anthropic: { type: "oauth" as const, access: "tok-2", refresh: "ref", expires: 1 },
+      anthropic: { type: "oauth" as const, access: "tok-2", refresh: "ref", expires: farFuture },
       missing: { type: "wellknown" as const, key: "wk-3" },
     };
     expect(bearerToken(getCredential(auth, "openai"))).toBe("sk-1");
     expect(bearerToken(getCredential(auth, "anthropic"))).toBe("tok-2");
     expect(bearerToken(getCredential(auth, "missing"))).toBe("wk-3");
     expect(bearerToken(getCredential(auth, "nope"))).toBeNull();
+  });
+
+  it("bearerToken returns null for expired OAuth tokens", () => {
+    const expired = { type: "oauth" as const, access: "tok-stale", refresh: "ref", expires: 1 };
+    expect(bearerToken(expired)).toBeNull();
   });
 });

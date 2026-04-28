@@ -1,4 +1,4 @@
-import { bearerToken, getCredential } from "../config/auth.js";
+import { bearerToken, getCredential, isOAuthExpired } from "../config/auth.js";
 import type { ForwardInput, ForwardResult } from "./types.js";
 import { ForwardError } from "./types.js";
 
@@ -7,6 +7,9 @@ export async function forwardOpenAICompat(input: ForwardInput): Promise<ForwardR
   const cred = getCredential(auth, model.provider);
   const token = bearerToken(cred);
   if (!token && model.provider !== "opencode") {
+    if (isOAuthExpired(cred)) {
+      throw new ForwardError(401, `OAuth token expired for ${model.provider} — run \`opencode auth login ${model.provider}\` to refresh`, false);
+    }
     throw new ForwardError(401, `no credentials for ${model.provider}`, false);
   }
 

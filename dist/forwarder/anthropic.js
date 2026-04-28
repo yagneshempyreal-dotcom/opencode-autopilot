@@ -1,12 +1,16 @@
-import { bearerToken, getCredential } from "../config/auth.js";
+import { bearerToken, getCredential, isOAuthExpired } from "../config/auth.js";
 import { ForwardError } from "./types.js";
 const ANTHROPIC_VERSION = "2023-06-01";
 export async function forwardAnthropic(input) {
     const { request, model, auth, signal } = input;
     const cred = getCredential(auth, model.provider);
     const token = bearerToken(cred);
-    if (!token)
+    if (!token) {
+        if (isOAuthExpired(cred)) {
+            throw new ForwardError(401, `OAuth token expired for ${model.provider} — run \`opencode auth login ${model.provider}\` to refresh`, false);
+        }
         throw new ForwardError(401, `no credentials for ${model.provider}`, false);
+    }
     const baseURL = model.baseURL ?? "https://api.anthropic.com/v1";
     const url = `${baseURL.replace(/\/$/, "")}/messages`;
     const { system, messages } = splitSystem(request.messages);

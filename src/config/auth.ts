@@ -27,6 +27,15 @@ export function getCredential(auth: OpenCodeAuth, provider: string): AuthEntry |
 export function bearerToken(entry: AuthEntry | null): string | null {
   if (!entry) return null;
   if (entry.type === "api" || entry.type === "wellknown") return entry.key;
-  if (entry.type === "oauth") return entry.access;
+  if (entry.type === "oauth") {
+    // expires is in ms-since-epoch; treat as expired with 30s safety margin.
+    if (typeof entry.expires === "number" && entry.expires - Date.now() < 30_000) return null;
+    return entry.access;
+  }
   return null;
+}
+
+export function isOAuthExpired(entry: AuthEntry | null): boolean {
+  if (!entry || entry.type !== "oauth") return false;
+  return typeof entry.expires === "number" && entry.expires - Date.now() < 30_000;
 }

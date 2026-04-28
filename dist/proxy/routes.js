@@ -9,6 +9,7 @@ import { formatBadge } from "../badge/format.js";
 import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
 import { saveConfig } from "../config/store.js";
+import { loadAuth } from "../config/auth.js";
 import { extractTaskTags } from "../classifier/tags.js";
 import { saveHealth, verifyAll } from "../registry/health.js";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
@@ -170,13 +171,28 @@ export async function handleChatCompletions(req, res, ctx) {
         : null;
     const stream = parsed.request.stream ?? false;
     parsed.request.stream = stream;
+    // Reload auth from disk if any cached entry is OAuth — opencode refreshes
+    // access tokens and writes them back to auth.json, and a stale value here
+    // gives 401 once the token expires (~1 h). API-key-only setups skip the
+    // file read; this also keeps tests deterministic when ctx.auth is a literal.
+    let liveAuth = ctx.auth;
+    const hasOAuth = Object.values(ctx.auth).some((e) => e?.type === "oauth");
+    if (hasOAuth) {
+        try {
+            liveAuth = await loadAuth();
+            ctx.auth = liveAuth;
+        }
+        catch (err) {
+            logger.warn("auth reload failed; using cached", { err: err.message });
+        }
+    }
     let dispatchResult;
     try {
         dispatchResult = await dispatch({
             decision,
             request: parsed.request,
             registry: ctx.registry,
-            auth: ctx.auth,
+            auth: liveAuth,
             allowEscalation: !parsed.override,
             health: ctx.health,
         });
@@ -557,6 +573,12 @@ function formatExhaustedReply(ctx, decision, errMsg) {
         "",
     ];
     // Targeted advice based on what actually broke.
+    if (causes.expiredOAuth.length > 0) {
+        lines.push("**Expired OAuth tokens.** opencode's OAuth access tokens expire (~1 h). The router can't refresh them — re-login through opencode:");
+        for (const p of causes.expiredOAuth)
+            lines.push(`  · ${p} — run \`opencode auth login ${p}\``);
+        lines.push("");
+    }
     if (causes.missingCreds.length > 0) {
         lines.push("**Missing auth credentials.** opencode reported 401 / \"no credentials for…\" for:");
         for (const p of causes.missingCreds)
@@ -613,12 +635,15 @@ function parseAttempts(errMsg) {
     }
 }
 function classifyCauses(attempts) {
-    const out = { missingCreds: [], invalidCreds: [], quota: [], notFound: [] };
+    const out = { missingCreds: [], expiredOAuth: [], invalidCreds: [], quota: [], notFound: [] };
     const seenProvider = (set, p) => { if (!set.includes(p))
         set.push(p); };
     for (const a of attempts) {
         const reason = (a.reason ?? "").toLowerCase();
-        if (a.status === 401 || /no credentials|missing.*key|unauthorized/.test(reason)) {
+        if (/oauth token expired/.test(reason)) {
+            seenProvider(out.expiredOAuth, a.provider);
+        }
+        else if (a.status === 401 || /no credentials|missing.*key|unauthorized/.test(reason)) {
             if (/no credentials/.test(reason))
                 seenProvider(out.missingCreds, a.provider);
             else
