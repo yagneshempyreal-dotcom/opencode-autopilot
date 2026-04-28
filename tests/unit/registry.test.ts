@@ -145,4 +145,21 @@ describe("buildRegistry", () => {
     });
     expect(reg.models).toHaveLength(0);
   });
+
+  it("excludes openauto/router self-providers (no infinite loop)", () => {
+    const reg = buildRegistry({
+      auth: { openauto: { type: "api", key: "x" }, openai: { type: "api", key: "k" } },
+      opencodeConfig: {
+        provider: {
+          openauto: { models: { auto: { name: "OpenAuto" } } },
+          openai: { models: { "gpt-5.4-mini": {} } },
+        },
+      },
+      configuredTiers: { "cheap-paid": ["openauto/auto", "openai/gpt-5.4-mini"] },
+      recentModels: [{ providerID: "openauto", modelID: "auto" }],
+    });
+    const ids = reg.models.map((m) => `${m.provider}/${m.modelID}`);
+    expect(ids).not.toContain("openauto/auto");
+    expect(ids).toContain("openai/gpt-5.4-mini");
+  });
 });

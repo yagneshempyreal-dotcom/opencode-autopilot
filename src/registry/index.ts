@@ -46,9 +46,13 @@ export function buildRegistry(input: ScanInput): Registry {
   return { models, byID, flagged };
 }
 
+const SELF_PROVIDERS = new Set(["openauto", "router"]);
+
 function collectSeedModels(input: ScanInput): Array<{ provider: string; modelID: string }> {
   const out: Array<{ provider: string; modelID: string }> = [];
+  const skip = (p: string) => SELF_PROVIDERS.has(p.toLowerCase());
   for (const provider of Object.keys(input.auth)) {
+    if (skip(provider)) continue;
     const cfgModels = input.opencodeConfig.provider?.[provider]?.models;
     if (cfgModels) {
       for (const modelID of Object.keys(cfgModels)) out.push({ provider, modelID });
@@ -56,18 +60,24 @@ function collectSeedModels(input: ScanInput): Array<{ provider: string; modelID:
   }
   if (input.opencodeConfig.provider) {
     for (const [provider, pCfg] of Object.entries(input.opencodeConfig.provider)) {
+      if (skip(provider)) continue;
       if (pCfg.models) for (const modelID of Object.keys(pCfg.models)) out.push({ provider, modelID });
     }
   }
   if (input.recentModels) {
-    for (const m of input.recentModels) out.push({ provider: m.providerID, modelID: m.modelID });
+    for (const m of input.recentModels) {
+      if (skip(m.providerID)) continue;
+      out.push({ provider: m.providerID, modelID: m.modelID });
+    }
   }
   if (input.configuredTiers) {
     for (const ids of Object.values(input.configuredTiers)) {
       for (const id of ids) {
         const slash = id.indexOf("/");
         if (slash <= 0) continue;
-        out.push({ provider: id.slice(0, slash), modelID: id.slice(slash + 1) });
+        const provider = id.slice(0, slash);
+        if (skip(provider)) continue;
+        out.push({ provider, modelID: id.slice(slash + 1) });
       }
     }
   }

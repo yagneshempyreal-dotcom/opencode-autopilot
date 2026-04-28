@@ -27,9 +27,13 @@ export function buildRegistry(input) {
     const flagged = models.filter((m) => isFlaggedAsUnknown(m.provider, m.modelID));
     return { models, byID, flagged };
 }
+const SELF_PROVIDERS = new Set(["openauto", "router"]);
 function collectSeedModels(input) {
     const out = [];
+    const skip = (p) => SELF_PROVIDERS.has(p.toLowerCase());
     for (const provider of Object.keys(input.auth)) {
+        if (skip(provider))
+            continue;
         const cfgModels = input.opencodeConfig.provider?.[provider]?.models;
         if (cfgModels) {
             for (const modelID of Object.keys(cfgModels))
@@ -38,14 +42,19 @@ function collectSeedModels(input) {
     }
     if (input.opencodeConfig.provider) {
         for (const [provider, pCfg] of Object.entries(input.opencodeConfig.provider)) {
+            if (skip(provider))
+                continue;
             if (pCfg.models)
                 for (const modelID of Object.keys(pCfg.models))
                     out.push({ provider, modelID });
         }
     }
     if (input.recentModels) {
-        for (const m of input.recentModels)
+        for (const m of input.recentModels) {
+            if (skip(m.providerID))
+                continue;
             out.push({ provider: m.providerID, modelID: m.modelID });
+        }
     }
     if (input.configuredTiers) {
         for (const ids of Object.values(input.configuredTiers)) {
@@ -53,7 +62,10 @@ function collectSeedModels(input) {
                 const slash = id.indexOf("/");
                 if (slash <= 0)
                     continue;
-                out.push({ provider: id.slice(0, slash), modelID: id.slice(slash + 1) });
+                const provider = id.slice(0, slash);
+                if (skip(provider))
+                    continue;
+                out.push({ provider, modelID: id.slice(slash + 1) });
             }
         }
     }
