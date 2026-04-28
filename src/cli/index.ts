@@ -40,6 +40,9 @@ async function main(): Promise<void> {
     case "verbose":
       await runUx({ badge: true });
       return;
+    case "refresh":
+      await runRefresh(rest);
+      return;
     default:
       console.error(`Unknown command: ${cmd}`);
       printHelp();
@@ -62,6 +65,7 @@ Commands:
   handover-now   force a handover at the current point (requires running session)
   quiet          disable per-turn badge in responses
   verbose        enable per-turn badge in responses
+  refresh [--yes]  pull latest plugin: kill opencode TUIs, clear caches, restart
   help           show this message
 
 Config: ${CONFIG_PATH}
@@ -317,6 +321,111 @@ async function runUx(patch: { badge: boolean }): Promise<void> {
   cfg.ux.badge = patch.badge;
   await saveConfig(cfg);
   console.log(`✓ badge ${patch.badge ? "enabled" : "disabled"}`);
+}
+
+async function runRefresh(args: string[]): Promise<void> {
+  const yes = args.includes("--yes") || args.includes("-y");
+  const noLaunch = args.includes("--no-launch");
+
+  const { spawn } = await import("node:child_process");
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { rm, readdir, writeFile } = await import("node:fs/promises");
+
+  console.log("opencode-openauto refresh\n");
+
+  const pids = await detectOpencodePids();
+  if (pids.length > 0) {
+    console.log(`Detected ${pids.length} running opencode process(es):`);
+    for (const p of pids) console.log(`  · pid=${p.pid}  tty=${p.tty}  cmd=${p.cmd}`);
+    const ok = yes || (await askYesNo("\nKill them so the plugin can reload?", true));
+    if (!ok) {
+      console.log("Aborted. (Refresh requires opencode to be down.)");
+      return;
+    }
+    for (const p of pids) {
+      try { process.kill(p.pid, "SIGTERM"); } catch { /* gone */ }
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+    const stragglers = await detectOpencodePids();
+    for (const p of stragglers) {
+      try { process.kill(p.pid, "SIGKILL"); } catch { /* gone */ }
+    }
+    console.log("✓ opencode processes stopped");
+  } else {
+    console.log("No opencode processes running.");
+  }
+
+  // Clear plugin caches.
+  const ocCache = join(homedir(), ".cache", "opencode", "packages");
+  try {
+    const entries = await readdir(ocCache).catch(() => [] as string[]);
+    for (const e of entries) {
+      if (e.startsWith("opencode-openauto") || e.includes("openauto") || e.includes("autopilot")) {
+        await rm(join(ocCache, e), { recursive: true, force: true });
+      }
+    }
+  } catch { /* ignore */ }
+
+  const bunCache = join(homedir(), ".bun", "install", "cache");
+  try {
+    const entries = await readdir(bunCache).catch(() => [] as string[]);
+    for (const e of entries) {
+      if (/openauto|autopilot/i.test(e)) {
+        await rm(join(bunCache, e), { recursive: true, force: true });
+      }
+    }
+  } catch { /* ignore */ }
+  console.log("✓ caches cleared (~/.cache/opencode/packages, ~/.bun/install/cache)");
+
+  // Truncate runtime log for a clean view.
+  try {
+    await writeFile(join(homedir(), ".local", "share", "opencode", "autopilot.log"), "", "utf8");
+    console.log("✓ autopilot.log truncated");
+  } catch { /* ignore */ }
+
+  if (noLaunch) {
+    console.log("\nReady. Start opencode yourself when convenient.");
+    return;
+  }
+
+  const launch = yes || (await askYesNo("\nLaunch opencode now?", true));
+  if (!launch) {
+    console.log("\nReady. Start opencode when convenient.");
+    return;
+  }
+
+  console.log("\nStarting opencode (detached)…");
+  const child = spawn("opencode", [], {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  await new Promise((r) => setTimeout(r, 2500));
+  console.log("✓ opencode launched. Pick model 'OpenAuto / OpenAuto Router' and try `!router status`.");
+}
+
+interface RunningProc { pid: number; tty: string; cmd: string; }
+
+async function detectOpencodePids(): Promise<RunningProc[]> {
+  const { execSync } = await import("node:child_process");
+  try {
+    const raw = execSync("ps -axo pid=,tty=,command=", { encoding: "utf8" });
+    const out: RunningProc[] = [];
+    for (const line of raw.split("\n")) {
+      const m = /^\s*(\d+)\s+(\S+)\s+(.*)$/.exec(line);
+      if (!m) continue;
+      const [, pidStr, tty, cmd] = m;
+      if (!cmd) continue;
+      if (cmd.includes("language_server") || cmd.includes("claude")) continue;
+      // Match the opencode binary itself (not any path containing the word).
+      const isOpencode = /(?:^|\/)opencode(?:\s|$)/.test(cmd) || /(?:^|\/)opencode\s+serve\b/.test(cmd);
+      if (!isOpencode) continue;
+      if (process.pid === Number(pidStr)) continue;
+      out.push({ pid: Number(pidStr), tty: tty ?? "?", cmd });
+    }
+    return out;
+  } catch { return []; }
 }
 
 main().catch((err) => {
