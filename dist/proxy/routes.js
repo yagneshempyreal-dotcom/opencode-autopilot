@@ -538,6 +538,10 @@ function formatExhaustedReply(ctx, decision, errMsg) {
     const quotaDown = records.filter(([, r]) => r.status === "down" && r.quotaError).map(([id]) => id);
     const otherDown = records.filter(([, r]) => r.status === "down" && !r.quotaError).map(([id]) => id);
     const totalRegistry = ctx.registry.models.length;
+    // Bucket failures by root cause so we can give a specific fix instead
+    // of a generic checklist. Parse the dispatch error JSON if present.
+    const auth = parseAttempts(errMsg);
+    const causes = classifyCauses(auth);
     const lines = [
         "**router · all candidates failed**",
         "",
@@ -551,22 +555,86 @@ function formatExhaustedReply(ctx, decision, errMsg) {
         `  · quota:     ${quotaDown.length}    (402/429/insufficient balance — backoff 60min)`,
         `  · other:     ${otherDown.length}    (transient — retried after 5min)`,
         "",
-        "What to do:",
-        "  1. `router verify`    — re-probe everything; auto-pins the OK set",
-        "  2. `router goal cost` — prefer free models if your paid quotas are out",
-        "  3. Check ~/.local/share/opencode/auth.json — make sure provider keys exist and are valid",
-        "  4. If you have free models in your auth, they should pick up automatically",
     ];
+    // Targeted advice based on what actually broke.
+    if (causes.missingCreds.length > 0) {
+        lines.push("**Missing auth credentials.** opencode reported 401 / \"no credentials for…\" for:");
+        for (const p of causes.missingCreds)
+            lines.push(`  · ${p} — run \`opencode auth login ${p}\``);
+        lines.push("");
+    }
+    if (causes.invalidCreds.length > 0) {
+        lines.push("**Invalid / expired credentials.** Provider returned 401 / 403:");
+        for (const p of causes.invalidCreds)
+            lines.push(`  · ${p} — re-run \`opencode auth login ${p}\``);
+        lines.push("");
+    }
+    if (causes.quota.length > 0) {
+        lines.push("**Quota / billing exhausted** (402, 429, \"insufficient balance\"):");
+        for (const p of causes.quota)
+            lines.push(`  · ${p} — top up the account or wait, then \`router verify\``);
+        lines.push("");
+    }
+    if (causes.notFound.length > 0) {
+        lines.push("**Model not found** (404). The model id in your config doesn't exist on the provider:");
+        for (const id of causes.notFound)
+            lines.push(`  · ${id} — remove it from \`~/.config/opencode/autopilot.json\` tiers`);
+        lines.push("");
+    }
+    if (totalRegistry <= 1) {
+        lines.push("**Only 1 model in the registry.** You need more providers configured for routing to be useful:");
+        lines.push("  · `opencode auth login openrouter`   — free + paid via openrouter");
+        lines.push("  · `opencode auth login deepseek`     — cheap chat / reasoner");
+        lines.push("  · `opencode auth login anthropic`    — claude family");
+        lines.push("  · or use opencode's wellknown free tier (no key required)");
+        lines.push("");
+    }
+    lines.push("Generic next steps:");
+    lines.push("  1. `router verify`    — re-probe everything; auto-pins the OK set");
+    lines.push("  2. `router goal cost` — prefer free models if your paid quotas are out");
+    lines.push("  3. `router models`    — see what's actually in your registry");
     if (ok.length > 0) {
         lines.push("");
         lines.push(`Currently working: ${ok.slice(0, 5).join(", ")}${ok.length > 5 ? ` (+${ok.length - 5} more)` : ""}`);
         lines.push("Pin them: `router pick all-ok`");
     }
-    else {
-        lines.push("");
-        lines.push("**No models are responding right now.** Try `router verify` to refresh, or check that your provider keys are valid.");
-    }
     return lines.join("\n");
+}
+function parseAttempts(errMsg) {
+    // dispatch errors look like: forward 503: all candidates failed: [{...},{...}]
+    const m = /\[(\{.*\})\]/s.exec(errMsg);
+    if (!m)
+        return [];
+    try {
+        return JSON.parse(`[${m[1]}]`);
+    }
+    catch {
+        return [];
+    }
+}
+function classifyCauses(attempts) {
+    const out = { missingCreds: [], invalidCreds: [], quota: [], notFound: [] };
+    const seenProvider = (set, p) => { if (!set.includes(p))
+        set.push(p); };
+    for (const a of attempts) {
+        const reason = (a.reason ?? "").toLowerCase();
+        if (a.status === 401 || /no credentials|missing.*key|unauthorized/.test(reason)) {
+            if (/no credentials/.test(reason))
+                seenProvider(out.missingCreds, a.provider);
+            else
+                seenProvider(out.invalidCreds, a.provider);
+        }
+        else if (a.status === 403) {
+            seenProvider(out.invalidCreds, a.provider);
+        }
+        else if (a.status === 402 || a.status === 429 || /insufficient.*balance|exceeded.*quota/.test(reason)) {
+            seenProvider(out.quota, a.provider);
+        }
+        else if (a.status === 404 || /not found|model.*does not exist/.test(reason)) {
+            out.notFound.push(`${a.provider}/${a.modelID}`);
+        }
+    }
+    return out;
 }
 function goalMatrixPreview(goal, ctx) {
     const row = GOAL_MATRIX[goal];
