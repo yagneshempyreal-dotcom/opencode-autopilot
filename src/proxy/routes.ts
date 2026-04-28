@@ -187,7 +187,12 @@ export async function handleChatCompletions(
     saveHealth(ctx.health).catch((e) => logger.warn("saveHealth failed", { err: (e as Error).message }));
   } catch (err) {
     logger.error("dispatch failed", { err: (err as Error).message });
-    fail(res, 502, `dispatch failed: ${(err as Error).message}`);
+    // Returning a 5xx makes opencode retry the whole turn (3x by default),
+    // burning the same dead-model cascade each time. Return 200 with a
+    // synthetic assistant message instead so the user sees what's wrong
+    // and the host stops retrying.
+    const text = formatExhaustedReply(ctx, decision, (err as Error).message);
+    respondInline(res, parsed.request.stream === true, text);
     return;
   }
 
@@ -397,8 +402,8 @@ function formatStatus(ctx: ProxyContext): string {
   const tierCounts = (["free", "cheap-paid", "top-paid"] as Tier[])
     .map((t) => `${t}=${modelsForTier(ctx.registry, t).length}`)
     .join("  ");
-  const okCount = Object.values(ctx.health.records).filter((r) => r.status === "ok").length;
-  const downCount = Object.values(ctx.health.records).filter((r) => r.status === "down").length;
+  const okCount = Object.values((ctx.health?.records ?? {})).filter((r) => r.status === "ok").length;
+  const downCount = Object.values((ctx.health?.records ?? {})).filter((r) => r.status === "down").length;
   const allow = ctx.config.allowlist ?? [];
   return [
     `**router status**`,
@@ -481,7 +486,7 @@ async function runVerify(ctx: ProxyContext): Promise<string> {
 }
 
 function formatHealth(ctx: ProxyContext): string {
-  const records = Object.entries(ctx.health.records);
+  const records = Object.entries((ctx.health?.records ?? {}));
   if (records.length === 0) return "(no health records yet — run `router verify`)";
   records.sort(([a], [b]) => a.localeCompare(b));
   const lines = [`**health** (${records.length} records)`, ""];
@@ -505,7 +510,7 @@ async function applyPick(ctx: ProxyContext, arg: string): Promise<string> {
   }
   let picks: string[];
   if (/^all-?ok$/i.test(trimmed)) {
-    picks = Object.entries(ctx.health.records)
+    picks = Object.entries((ctx.health?.records ?? {}))
       .filter(([, r]) => r.status === "ok")
       .map(([id]) => id);
     if (picks.length === 0) return "No models with status=ok found. Run `router verify` first.";
@@ -541,6 +546,42 @@ async function applyPick(ctx: ProxyContext, arg: string): Promise<string> {
   out.push("Switch goal: `router goal cost|balance|quality`");
   out.push("Re-verify any time: `router verify`");
   return out.join("\n");
+}
+
+function formatExhaustedReply(ctx: ProxyContext, decision: { tier: Tier; modelID: string }, errMsg: string): string {
+  const records = Object.entries(ctx.health?.records ?? {});
+  const ok = records.filter(([, r]) => r.status === "ok").map(([id]) => id);
+  const quotaDown = records.filter(([, r]) => r.status === "down" && r.quotaError).map(([id]) => id);
+  const otherDown = records.filter(([, r]) => r.status === "down" && !r.quotaError).map(([id]) => id);
+  const totalRegistry = ctx.registry.models.length;
+  const lines = [
+    "**router · all candidates failed**",
+    "",
+    `Tried tier \`${decision.tier}\` first (and fell through). Last error:`,
+    "```",
+    errMsg.slice(0, 400),
+    "```",
+    "",
+    `Registry has ${totalRegistry} model(s). Health right now:`,
+    `  · ok:        ${ok.length}`,
+    `  · quota:     ${quotaDown.length}    (402/429/insufficient balance — backoff 60min)`,
+    `  · other:     ${otherDown.length}    (transient — retried after 5min)`,
+    "",
+    "What to do:",
+    "  1. `router verify`    — re-probe everything; auto-pins the OK set",
+    "  2. `router goal cost` — prefer free models if your paid quotas are out",
+    "  3. Check ~/.local/share/opencode/auth.json — make sure provider keys exist and are valid",
+    "  4. If you have free models in your auth, they should pick up automatically",
+  ];
+  if (ok.length > 0) {
+    lines.push("");
+    lines.push(`Currently working: ${ok.slice(0, 5).join(", ")}${ok.length > 5 ? ` (+${ok.length - 5} more)` : ""}`);
+    lines.push("Pin them: `router pick all-ok`");
+  } else {
+    lines.push("");
+    lines.push("**No models are responding right now.** Try `router verify` to refresh, or check that your provider keys are valid.");
+  }
+  return lines.join("\n");
 }
 
 function goalMatrixPreview(goal: Goal, ctx: ProxyContext): string[] {

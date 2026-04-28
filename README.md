@@ -30,10 +30,15 @@ Everything is local: no telemetry, no extra service, plugin lives in your openco
 ```bash
 git clone https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git
 cd opencode-autopilot
+
+# macOS / Linux
 ./scripts/setup.sh
+
+# Windows (PowerShell or cmd)
+scripts\setup.cmd
 ```
 
-`setup.sh` writes the plugin entry **and** the `provider.openauto` block into `~/.config/opencode/opencode.json`. Run it once after cloning, then once more whenever you bump the proxy port. It is idempotent.
+`setup.sh` / `setup.cmd` writes the plugin entry **and** the `provider.openauto` block into your opencode config. Run it once after cloning, then once more whenever you bump the proxy port. It is idempotent.
 
 ### 2. Start opencode
 

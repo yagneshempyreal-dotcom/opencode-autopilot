@@ -123,13 +123,19 @@ describe("proxy edge cases", () => {
     clearAllSessions();
   });
 
-  it("returns 502 when every tier fails", async () => {
+  it("returns 200 with synthetic 'all candidates failed' message instead of 5xx", async () => {
+    // We deliberately turn 5xx into a 200 here so the host stops retrying
+    // the same dead cascade. The body must include a clear message + next
+    // steps so the user knows what to do.
     const r = await httpPost(proxy.port, "/v1/chat/completions", JSON.stringify({
       model: "auto",
       messages: [{ role: "user", content: "hello" }],
       stream: false,
     }));
-    expect(r.status).toBe(502);
+    expect(r.status).toBe(200);
+    const body = JSON.parse(r.text) as { choices: Array<{ message: { content: string } }> };
+    expect(body.choices[0]?.message.content).toMatch(/all candidates failed/i);
+    expect(body.choices[0]?.message.content).toMatch(/router verify/);
   });
 
   it("returns 400 on missing messages", async () => {
@@ -204,7 +210,9 @@ describe("proxy edge cases", () => {
         messages: [{ role: "user", content: "fix typo" }],
         stream: false,
       }));
-      expect(r.status).toBe(502); // upstream all-fail server returns 503 → escalate exhausts → 502
+      // Synthetic exhausted-reply (200) — same as above. Badge flag is
+      // irrelevant on this path since the reply is router-generated.
+      expect(r.status).toBe(200);
     } finally {
       ctx.config.ux.badge = true;
     }
