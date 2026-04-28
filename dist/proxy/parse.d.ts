@@ -19,6 +19,7 @@ export interface ParsedSignals {
     verifyRequested: boolean;
     pickArg: string | null;
     healthRequested: boolean;
+    badgeMode: "quiet" | "verbose" | null;
 }
 export declare function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string | null): ParsedRequest;
 export declare function lastUserIndex(messages: ChatMessage[]): number;

@@ -71,6 +71,15 @@ export async function handleChatCompletions(req, res, ctx) {
         respondInline(res, parsed.request.stream === true, text);
         return;
     }
+    if (parsed.signals.badgeMode) {
+        const wanted = parsed.signals.badgeMode === "verbose";
+        ctx.config.ux.badge = wanted;
+        await saveConfig(ctx.config).catch(() => { });
+        respondInline(res, parsed.request.stream === true, `**router · badge ${wanted ? "verbose" : "quiet"}**\n\nBadges will ${wanted
+            ? "show on every model change (and on tier escalation, sticky bump, context warning)"
+            : "be suppressed entirely"}. Toggle: \`router ${wanted ? "quiet" : "verbose"}\`.`);
+        return;
+    }
     if (!ctx.autoEnabled() && !parsed.override) {
         fail(res, 503, "router disabled (/auto off). Re-enable with /auto on.");
         return;
@@ -144,7 +153,14 @@ export async function handleChatCompletions(req, res, ctx) {
     if (triggerHandover) {
         ctx.events.emit({ type: "handover", sessionID: parsed.sessionID, reason: `utilization ${utilization.toFixed(2)}` });
     }
-    const badge = ctx.config.ux.badge
+    // Dedup: agentic flows can emit dozens of tool-call requests per user
+    // turn. Only show the badge when something interesting changed —
+    // different model, escalation, sticky bump, or a context warning.
+    const lastModel = session.lastModel;
+    const sameAsLast = lastModel === `${decision.provider}/${decision.modelID}` || lastModel === decision.modelID;
+    const interesting = decision.escalated || decision.override || !!stickyBumpedTo || warnHandover;
+    const showBadge = ctx.config.ux.badge && (!sameAsLast || interesting);
+    const badge = showBadge
         ? formatBadge({
             decision,
             ctxUtilization: utilization,

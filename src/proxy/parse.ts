@@ -19,6 +19,7 @@ export interface ParsedSignals {
   verifyRequested: boolean;
   pickArg: string | null;
   healthRequested: boolean;
+  badgeMode: "quiet" | "verbose" | null;
 }
 
 const OVERRIDE_RE = /(?:^|\s)@([\w./:-]+)\b/;
@@ -39,6 +40,8 @@ const SLASH_STATUS_RE = new RegExp(`${ROUTER_PREFIX}\\s+status\\b`, "i");
 const SLASH_MODELS_RE = new RegExp(`${ROUTER_PREFIX}\\s+models\\b`, "i");
 const SLASH_VERIFY_RE = new RegExp(`${ROUTER_PREFIX}\\s+verify\\b`, "i");
 const SLASH_HEALTH_RE = new RegExp(`${ROUTER_PREFIX}\\s+health\\b`, "i");
+const SLASH_QUIET_RE = new RegExp(`${ROUTER_PREFIX}\\s+quiet\\b`, "i");
+const SLASH_VERBOSE_RE = new RegExp(`${ROUTER_PREFIX}\\s+verbose\\b`, "i");
 // "router pick all-ok" | "router pick clear" | "router pick a/b, c/d, ..."
 const SLASH_PICK_RE = new RegExp(`${ROUTER_PREFIX}\\s+pick\\s+(.+)$`, "i");
 // Upgrade / auto kept under the router umbrella too. Legacy "/upgrade" and
@@ -73,6 +76,7 @@ export function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string
     verifyRequested: false,
     pickArg: null,
     healthRequested: false,
+    badgeMode: null,
   };
 
   if (lastUser >= 0) {
@@ -96,6 +100,8 @@ export function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string
       if (SLASH_MODELS_RE.test(txt)) signals.modelsRequested = true;
       if (SLASH_VERIFY_RE.test(txt)) signals.verifyRequested = true;
       if (SLASH_HEALTH_RE.test(txt)) signals.healthRequested = true;
+      if (SLASH_QUIET_RE.test(txt)) signals.badgeMode = "quiet";
+      if (SLASH_VERBOSE_RE.test(txt)) signals.badgeMode = "verbose";
       const pickMatch = SLASH_PICK_RE.exec(txt);
       if (pickMatch && pickMatch[1]) signals.pickArg = pickMatch[1].trim();
       if (!signals.upgradeRequested) {
