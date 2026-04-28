@@ -366,7 +366,7 @@ function formatGoalSwitchAck(before: Goal, after: Goal, ctx: ProxyContext): stri
     "Routing matrix for the new goal:",
     ...goalMatrixPreview(after, ctx),
     "",
-    "Tip: `!router status` to see current pick · `!router models` to list models per tier.",
+    "Tip: `router status` to see current pick · `router models` to list models per tier.",
   ];
   return lines.join("\n");
 }
@@ -386,7 +386,7 @@ function formatStatus(ctx: ProxyContext): string {
     `Routing matrix for current goal:`,
     ...goalMatrixPreview(ctx.config.goal, ctx),
     ``,
-    `Switch goal: \`!router goal cost|balance|quality\``,
+    `Switch goal: \`router goal cost|balance|quality\` (bare; no prefix needed)`,
   ].join("\n");
 }
 

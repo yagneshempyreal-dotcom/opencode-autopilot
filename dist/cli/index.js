@@ -367,8 +367,12 @@ Ready. Start opencode in your terminal:
 
 Then in the TUI:
   · model picker → "OpenAuto / OpenAuto Router"
-  · type "!router status" (note the bang, not slash)
-  · "!router goal balance" / "!router goal quality" to switch
+  · type plain (no leading "/" or "!" — opencode TUI eats those):
+       router status
+       router goal balance        router goal cost
+       router goal quality        router models
+       router upgrade             router reset
+       router auto on             router auto off
 `);
 }
 async function detectOpencodePids() {

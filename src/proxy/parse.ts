@@ -19,20 +19,27 @@ export interface ParsedSignals {
 }
 
 const OVERRIDE_RE = /(?:^|\s)@([\w./:-]+)\b/;
-// opencode TUI intercepts "/" as a slash-command palette, so prefer "!"
-// for in-chat directives. Accept either explicit prefix; never bare words
-// (would false-trigger on normal text like "upgrade the lib" or "router config").
-const ROUTER_PREFIX = "(?:^|\\s)[!/]router";
-const AUTO_PREFIX = "(?:^|\\s)[!/]auto";
-const UPGRADE_PREFIX = "(?:^|\\s)[!/]upgrade";
-const SLASH_UPGRADE_RE = new RegExp(`${UPGRADE_PREFIX}\\b`, "i");
+// opencode TUI intercepts "/" (slash command palette) and "!" (shell run),
+// so router commands must use a prefix the TUI passes through to the model.
+// Accepted forms (anchored to message start so prose doesn't false-trigger):
+//   router goal balance
+//   #router goal balance
+//   :router goal balance
+//   >router goal balance
+//   /router goal balance   (legacy; works in hosts that don't eat "/")
+// Legacy /upgrade and /auto are kept so existing scripts/docs still work.
+const ROUTER_PREFIX = "^\\s*[#:>/]?\\s*router";
 const SLASH_RESET_RE = new RegExp(`${ROUTER_PREFIX}\\s+reset\\b`, "i");
-const SLASH_AUTO_OFF_RE = new RegExp(`${AUTO_PREFIX}\\s+off\\b`, "i");
-const SLASH_AUTO_ON_RE = new RegExp(`${AUTO_PREFIX}\\s+on\\b`, "i");
 const SLASH_RESUME_RE = new RegExp(`${ROUTER_PREFIX}\\s+resume\\b`, "i");
 const SLASH_GOAL_RE = new RegExp(`${ROUTER_PREFIX}\\s+goal\\s+(cost|balance|quality)\\b`, "i");
 const SLASH_STATUS_RE = new RegExp(`${ROUTER_PREFIX}\\s+status\\b`, "i");
 const SLASH_MODELS_RE = new RegExp(`${ROUTER_PREFIX}\\s+models\\b`, "i");
+// Upgrade / auto kept under the router umbrella too. Legacy "/upgrade" and
+// "/auto on|off" still match anywhere in message (whitespace-preceded) since
+// "/" is unambiguous; new bare "router upgrade" form is anchored to start.
+const SLASH_UPGRADE_RE = /(?:^|\s)\/upgrade\b|^\s*[#:>]?\s*router\s+upgrade\b/i;
+const SLASH_AUTO_OFF_RE = /(?:^|\s)\/auto\s+off\b|^\s*[#:>]?\s*router\s+auto\s+off\b/i;
+const SLASH_AUTO_ON_RE = /(?:^|\s)\/auto\s+on\b|^\s*[#:>]?\s*router\s+auto\s+on\b/i;
 
 const UPGRADE_PHRASES = [
   /\bthis is wrong\b/i,
