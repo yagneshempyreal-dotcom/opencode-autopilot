@@ -78,10 +78,22 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
 
     if (!proxyHandle) {
       try {
+        const requestedPort = ctx.config.proxy.port;
         proxyHandle = await startProxy(ctx);
+        // Track the actual port in memory so the config hook can patch
+        // opencode.json's openauto baseURL correctly. Persist back to
+        // disk only if the request matched (= user explicitly chose port);
+        // otherwise leave config alone so we re-try the requested port
+        // next launch instead of getting stuck on a fallback.
         ctx.config.proxy.port = proxyHandle.port;
-        await saveConfig(ctx.config);
-        logger.info("autopilot proxy ready", { port: proxyHandle.port });
+        if (proxyHandle.port === requestedPort) {
+          await saveConfig(ctx.config);
+        }
+        logger.info("autopilot proxy ready", {
+          port: proxyHandle.port,
+          requested: requestedPort,
+          ...(proxyHandle.port !== requestedPort ? { note: "fallback — not persisted" } : {}),
+        });
       } catch (err) {
         logger.error("failed to start proxy", { err: (err as Error).message });
       }
