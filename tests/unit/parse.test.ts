@@ -121,4 +121,47 @@ describe("parseRequest", () => {
     }, "s12");
     expect(r.signals.modelsRequested).toBe(true);
   });
+
+  it("accepts !router prefix (TUI-safe alternative)", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "!router goal balance" }],
+    }, "s13");
+    expect(r.signals.goalSwitch).toBe("balance");
+  });
+
+  it("accepts !router status", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "!router status" }],
+    }, "s14");
+    expect(r.signals.statusRequested).toBe(true);
+  });
+
+  it("accepts !upgrade and !auto off", () => {
+    const r1 = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "!upgrade" }],
+    }, "s15");
+    expect(r1.signals.upgradeRequested).toBe(true);
+    const r2 = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "!auto off" }],
+    }, "s16");
+    expect(r2.signals.autoOff).toBe(true);
+  });
+
+  it("does not false-trigger on bare 'router' or 'upgrade' words", () => {
+    const r1 = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "please router this through the proxy" }],
+    }, "s17");
+    expect(r1.signals.goalSwitch).toBeNull();
+    expect(r1.signals.statusRequested).toBe(false);
+    const r2 = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "we should upgrade the dependency" }],
+    }, "s18");
+    expect(r2.signals.upgradeRequested).toBe(false);
+  });
 });

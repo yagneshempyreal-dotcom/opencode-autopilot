@@ -1,12 +1,18 @@
 const OVERRIDE_RE = /(?:^|\s)@([\w./:-]+)\b/;
-const SLASH_UPGRADE_RE = /(?:^|\s)\/upgrade\b/i;
-const SLASH_RESET_RE = /(?:^|\s)\/router\s+reset\b/i;
-const SLASH_AUTO_OFF_RE = /(?:^|\s)\/auto\s+off\b/i;
-const SLASH_AUTO_ON_RE = /(?:^|\s)\/auto\s+on\b/i;
-const SLASH_RESUME_RE = /(?:^|\s)\/router\s+resume\b/i;
-const SLASH_GOAL_RE = /(?:^|\s)\/router\s+goal\s+(cost|balance|quality)\b/i;
-const SLASH_STATUS_RE = /(?:^|\s)\/router\s+status\b/i;
-const SLASH_MODELS_RE = /(?:^|\s)\/router\s+models\b/i;
+// opencode TUI intercepts "/" as a slash-command palette, so prefer "!"
+// for in-chat directives. Accept either explicit prefix; never bare words
+// (would false-trigger on normal text like "upgrade the lib" or "router config").
+const ROUTER_PREFIX = "(?:^|\\s)[!/]router";
+const AUTO_PREFIX = "(?:^|\\s)[!/]auto";
+const UPGRADE_PREFIX = "(?:^|\\s)[!/]upgrade";
+const SLASH_UPGRADE_RE = new RegExp(`${UPGRADE_PREFIX}\\b`, "i");
+const SLASH_RESET_RE = new RegExp(`${ROUTER_PREFIX}\\s+reset\\b`, "i");
+const SLASH_AUTO_OFF_RE = new RegExp(`${AUTO_PREFIX}\\s+off\\b`, "i");
+const SLASH_AUTO_ON_RE = new RegExp(`${AUTO_PREFIX}\\s+on\\b`, "i");
+const SLASH_RESUME_RE = new RegExp(`${ROUTER_PREFIX}\\s+resume\\b`, "i");
+const SLASH_GOAL_RE = new RegExp(`${ROUTER_PREFIX}\\s+goal\\s+(cost|balance|quality)\\b`, "i");
+const SLASH_STATUS_RE = new RegExp(`${ROUTER_PREFIX}\\s+status\\b`, "i");
+const SLASH_MODELS_RE = new RegExp(`${ROUTER_PREFIX}\\s+models\\b`, "i");
 const UPGRADE_PHRASES = [
     /\bthis is wrong\b/i,
     /\btry again\b/i,
