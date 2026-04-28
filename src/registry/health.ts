@@ -13,6 +13,7 @@ export interface HealthRecord {
   consecutiveFails: number;
   lastError?: string;
   latencyMs?: number;
+  quotaError?: boolean;
 }
 
 export interface HealthStore {
@@ -21,8 +22,12 @@ export interface HealthStore {
 
 // Re-probe a "down" model after this much time elapses (gives it a chance to recover).
 export const DOWN_RETRY_MS = 5 * 60 * 1000;
+// Quota / billing failures are unlikely to clear fast — back off much longer.
+export const QUOTA_DOWN_RETRY_MS = 60 * 60 * 1000;
 // Don't re-verify a fresh OK record this often.
 export const OK_TTL_MS = 30 * 60 * 1000;
+
+const QUOTA_REASON_RE = /(insufficient[_ ]balance|exceeded.*quota|payment[_ ]required|billing|out of credits|rate[_ ]limit|429|402)/i;
 
 export function healthPath(): string {
   if (process.env.OPENCODE_AUTOPILOT_HEALTH_PATH) return process.env.OPENCODE_AUTOPILOT_HEALTH_PATH;
@@ -78,6 +83,9 @@ export function markDown(store: HealthStore, k: string, reason: string): void {
     lastOk: prev?.lastOk,
     consecutiveFails: (prev?.consecutiveFails ?? 0) + 1,
     lastError: reason.slice(0, 200),
+    // If the failure looks like a quota/billing problem, mark it as such
+    // so isHealthy() applies a longer back-off before re-trying.
+    quotaError: QUOTA_REASON_RE.test(reason) || undefined,
   };
 }
 
@@ -85,9 +93,10 @@ export function isHealthy(store: HealthStore, k: string, now: number = Date.now(
   const rec = store.records[k];
   if (!rec) return true; // unknown → optimistic, will get probed on first use
   if (rec.status === "ok") return true;
-  // Stale "down" record → give the model a retry window.
-  if (rec.status === "down" && now - rec.lastChecked > DOWN_RETRY_MS) return true;
-  return false;
+  if (rec.status !== "down") return false;
+  // Quota/billing errors clear slowly; transient errors get a faster retry.
+  const retryAfter = rec.quotaError ? QUOTA_DOWN_RETRY_MS : DOWN_RETRY_MS;
+  return now - rec.lastChecked > retryAfter;
 }
 
 export function knownDown(store: HealthStore): string[] {

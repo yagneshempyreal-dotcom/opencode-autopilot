@@ -41,6 +41,16 @@ describe("health store", () => {
     markOk(s, "p/m");
     expect(s.records["p/m"]?.consecutiveFails).toBe(0);
   });
+
+  it("flags quota/billing errors with longer backoff", () => {
+    const s = emptyStore();
+    markDown(s, "deepseek/x", "Insufficient Balance");
+    expect(s.records["deepseek/x"]?.quotaError).toBe(true);
+    markDown(s, "openai/y", "You exceeded your current quota");
+    expect(s.records["openai/y"]?.quotaError).toBe(true);
+    markDown(s, "p/transient", "ECONNRESET");
+    expect(s.records["p/transient"]?.quotaError).toBeUndefined();
+  });
 });
 
 describe("policy.decide respects health", () => {

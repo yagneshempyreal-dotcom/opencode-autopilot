@@ -7,11 +7,13 @@ export interface HealthRecord {
     consecutiveFails: number;
     lastError?: string;
     latencyMs?: number;
+    quotaError?: boolean;
 }
 export interface HealthStore {
     records: Record<string, HealthRecord>;
 }
 export declare const DOWN_RETRY_MS: number;
+export declare const QUOTA_DOWN_RETRY_MS: number;
 export declare const OK_TTL_MS: number;
 export declare function healthPath(): string;
 export declare function emptyStore(): HealthStore;

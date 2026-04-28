@@ -18,6 +18,9 @@ export interface DispatchInput {
   signal?: AbortSignal;
   allowEscalation: boolean;
   health?: HealthStore;
+  // Per-candidate timeout. When the picked model hangs longer than this
+  // we abort and move to the next candidate. Default 60s.
+  perAttemptTimeoutMs?: number;
 }
 
 export interface DispatchResult extends ForwardResult {
@@ -36,7 +39,13 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   const attempts: DispatchResult["attempts"] = [];
   const tried = new Set<string>();
   const startTier = input.decision.tier;
-  const tierOrder: Tier[] = input.allowEscalation ? tierLadder(startTier) : [startTier];
+  // Bidirectional fallback: try the target tier, then any higher tiers
+  // (escalation), then any lower tiers (downgrade). The router should
+  // always reach SOME working model rather than 503 just because the
+  // user has no quota left on the paid models.
+  const tierOrder: Tier[] = input.allowEscalation
+    ? dedupeTiers([...tierLadder(startTier), ...lowerTiers(startTier)])
+    : [startTier];
   const health = input.health ?? emptyStore();
 
   let escalated = false;
@@ -48,13 +57,21 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       const id = `${candidate.provider}/${candidate.modelID}`;
       tried.add(id);
       const t0 = Date.now();
+      // Per-attempt timeout. If a model hangs, abort and try the next
+      // candidate rather than freezing the whole dispatch.
+      const timeoutMs = input.perAttemptTimeoutMs ?? 60_000;
+      const ctrl = new AbortController();
+      const upstream = input.signal;
+      const onUpstreamAbort = () => ctrl.abort();
+      if (upstream) upstream.addEventListener("abort", onUpstreamAbort, { once: true });
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
         const fwd = FORWARDERS[candidate.apiShape];
         const result = await fwd({
           request: input.request,
           model: candidate,
           auth: input.auth,
-          signal: input.signal,
+          signal: ctrl.signal,
         });
         markOk(health, healthKey(candidate.provider, candidate.modelID), Date.now() - t0);
         return { ...result, attempts: [...attempts, { provider: candidate.provider, modelID: candidate.modelID, status: result.status }], escalated };
@@ -69,12 +86,33 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
           attempts.push({ provider: candidate.provider, modelID: candidate.modelID, status: 0, reason: (err as Error).message });
           logger.warn("forward exception", { provider: candidate.provider, model: candidate.modelID, err: (err as Error).message });
         }
+      } finally {
+        clearTimeout(timer);
+        if (upstream) upstream.removeEventListener("abort", onUpstreamAbort);
       }
     }
     if (i < tierOrder.length - 1) escalated = true;
   }
 
   throw new ForwardError(503, `all candidates failed: ${JSON.stringify(attempts)}`, false);
+}
+
+function lowerTiers(start: Tier): Tier[] {
+  const all: Tier[] = ["free", "cheap-paid", "top-paid"];
+  const idx = all.indexOf(start);
+  if (idx <= 0) return [];
+  return all.slice(0, idx).reverse(); // closest-lower first
+}
+
+function dedupeTiers(arr: Tier[]): Tier[] {
+  const seen = new Set<Tier>();
+  const out: Tier[] = [];
+  for (const t of arr) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
 }
 
 function candidatePool(input: DispatchInput, tier: Tier, tried: Set<string>, health: HealthStore): ModelEntry[] {
