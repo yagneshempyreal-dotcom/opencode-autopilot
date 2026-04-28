@@ -35,6 +35,17 @@ describe("classifyModel", () => {
     expect(classifyModel("openrouter", "x-ai/grok-code-fast-1")).toBe("cheap-paid");
   });
 
+  it("size-reduced variants always cheap-paid (no top-paid overlap)", () => {
+    // These shouldn't get mis-tiered as top-paid even though their family name
+    // (gpt-5, opus, sonnet) matches TOP_PATTERNS.
+    expect(classifyModel("openai", "gpt-5-nano")).toBe("cheap-paid");
+    expect(classifyModel("openai", "gpt-5-mini")).toBe("cheap-paid");
+    expect(classifyModel("openai", "gpt-5.1-codex-mini")).toBe("cheap-paid");
+    expect(classifyModel("openai", "gpt-5.4-mini-fast")).toBe("cheap-paid");
+    expect(classifyModel("anthropic", "claude-haiku-4.5")).toBe("cheap-paid");
+    expect(classifyModel("zhipuai", "glm-5-flash")).toBe("cheap-paid");
+  });
+
   it("defaults unknowns to cheap-paid + flags them", () => {
     expect(classifyModel("custom", "weird-model-id-9000")).toBe("cheap-paid");
     expect(isFlaggedAsUnknown("custom", "weird-model-id-9000")).toBe(true);

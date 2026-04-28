@@ -41,10 +41,17 @@ const CTX_HINTS = [
     { pattern: /haiku/i, ctx: 200_000 },
 ];
 const DEFAULT_CTX = 32_000;
+// Models with these suffixes are size-reduced variants and always cheap-paid,
+// regardless of whether their family name (gpt-5, claude-opus...) also matches
+// a TOP_PATTERN. Without this override, e.g. `gpt-5-nano` is mis-tiered as
+// top-paid because TOP_PATTERNS match first.
+const SMALL_VARIANT_RE = /\b(?:mini|nano|tiny|small|haiku|flash|turbo|fast)\b|-codex-(?:mini|nano|spark)/i;
 export function classifyModel(provider, modelID) {
     const haystack = `${provider}/${modelID}`;
     if (FREE_PATTERNS.some((re) => re.test(haystack)))
         return "free";
+    if (SMALL_VARIANT_RE.test(haystack))
+        return "cheap-paid";
     if (TOP_PATTERNS.some((re) => re.test(haystack)))
         return "top-paid";
     if (CHEAP_PATTERNS.some((re) => re.test(haystack)))
