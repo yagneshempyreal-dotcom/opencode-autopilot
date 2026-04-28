@@ -300,8 +300,6 @@ async function runUx(patch) {
 }
 async function runRefresh(args) {
     const yes = args.includes("--yes") || args.includes("-y");
-    const noLaunch = args.includes("--no-launch");
-    const { spawn } = await import("node:child_process");
     const { homedir } = await import("node:os");
     const { join } = await import("node:path");
     const { rm, readdir, writeFile } = await import("node:fs/promises");
@@ -363,23 +361,15 @@ async function runRefresh(args) {
         console.log("✓ autopilot.log truncated");
     }
     catch { /* ignore */ }
-    if (noLaunch) {
-        console.log("\nReady. Start opencode yourself when convenient.");
-        return;
-    }
-    const launch = yes || (await askYesNo("\nLaunch opencode now?", true));
-    if (!launch) {
-        console.log("\nReady. Start opencode when convenient.");
-        return;
-    }
-    console.log("\nStarting opencode (detached)…");
-    const child = spawn("opencode", [], {
-        detached: true,
-        stdio: "ignore",
-    });
-    child.unref();
-    await new Promise((r) => setTimeout(r, 2500));
-    console.log("✓ opencode launched. Pick model 'OpenAuto / OpenAuto Router' and try `!router status`.");
+    console.log(`
+Ready. Start opencode in your terminal:
+  $ opencode
+
+Then in the TUI:
+  · model picker → "OpenAuto / OpenAuto Router"
+  · type "!router status" (note the bang, not slash)
+  · "!router goal balance" / "!router goal quality" to switch
+`);
 }
 async function detectOpencodePids() {
     const { execSync } = await import("node:child_process");
