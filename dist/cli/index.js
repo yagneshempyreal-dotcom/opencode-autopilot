@@ -41,6 +41,9 @@ async function main() {
         case "refresh":
             await runRefresh(rest);
             return;
+        case "setup":
+            await runSetup(rest);
+            return;
         default:
             console.error(`Unknown command: ${cmd}`);
             printHelp();
@@ -63,6 +66,7 @@ Commands:
   quiet          disable per-turn badge in responses
   verbose        enable per-turn badge in responses
   refresh [--yes]  pull latest plugin: kill opencode TUIs, clear caches, restart
+  setup [--port=4317]  one-shot: register openauto provider + plugin in opencode.json
   help           show this message
 
 Config: ${CONFIG_PATH}
@@ -297,6 +301,50 @@ async function runUx(patch) {
     cfg.ux.badge = patch.badge;
     await saveConfig(cfg);
     console.log(`✓ badge ${patch.badge ? "enabled" : "disabled"}`);
+}
+async function runSetup(args) {
+    const portArg = args.find((a) => a.startsWith("--port="));
+    const port = portArg ? Number(portArg.slice("--port=".length)) : 4317;
+    if (!Number.isFinite(port) || port < 1 || port > 65535) {
+        console.error(`Invalid port: ${portArg}`);
+        process.exit(2);
+    }
+    const { ensureRouterProvider } = await import("../config/opencode.js");
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const { opencodeJsonPath } = await import("../util/paths.js");
+    const path = opencodeJsonPath();
+    // Add the plugin entry too if missing — provider alone isn't enough,
+    // opencode also needs to fetch the plugin code.
+    const PLUGIN_SPEC = "opencode-openauto@git+https://github.com/yagneshempyreal-dotcom/opencode-autopilot.git";
+    let cfg = {};
+    try {
+        cfg = JSON.parse(await readFile(path, "utf8"));
+    }
+    catch (err) {
+        const e = err;
+        if (e.code !== "ENOENT")
+            throw err;
+    }
+    let plugins = cfg.plugin ?? [];
+    const isOurs = (p) => {
+        const name = typeof p === "string" ? p : p[0];
+        return typeof name === "string" &&
+            (name === "opencode-openauto" || name === "opencode-autopilot" ||
+                name.startsWith("opencode-openauto@") || name.startsWith("opencode-autopilot@"));
+    };
+    const hadPlugin = plugins.some(isOurs);
+    plugins = plugins.filter((p) => !isOurs(p));
+    plugins.push(PLUGIN_SPEC);
+    cfg.plugin = plugins;
+    await writeFile(path, JSON.stringify(cfg, null, 2), "utf8");
+    const r = await ensureRouterProvider(port, path);
+    console.log(`opencode-openauto setup\n`);
+    console.log(`opencode.json:        ${path}`);
+    console.log(`plugin entry:         ${hadPlugin ? "already present (refreshed)" : "added"}`);
+    console.log(`openauto provider:    ${r.patched ? `wrote (${r.reason})` : "already correct"}`);
+    console.log(`baseURL:              http://127.0.0.1:${port}/v1`);
+    console.log(`\nNow start opencode and pick "OpenAuto Router / OpenAuto" in the model picker.`);
+    console.log(`If it doesn't appear yet, quit and start opencode once more.`);
 }
 async function runRefresh(args) {
     const yes = args.includes("--yes") || args.includes("-y");
