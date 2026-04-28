@@ -97,9 +97,8 @@ src/
 └── util/                logging, paths, token estimation
 
 scripts/
-├── setup.sh             register plugin + provider in opencode.json
-├── refresh.sh           kill opencode + clear caches + restart prompt
-└── postinstall.cjs      legacy installer (now gated behind `setup` script)
+├── setup.sh / setup.cmd       register plugin + provider in opencode.json
+└── refresh.sh / refresh.cmd   kill opencode + clear caches + restart prompt
 
 tests/
 ├── unit/                28 files, fast, hermetic

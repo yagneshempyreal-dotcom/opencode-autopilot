@@ -15,6 +15,7 @@
     "dist",
     "scripts",
     "README.md",
+    "CONTRIBUTING.md",
     "LICENSE"
   ],
   "scripts": {
@@ -25,8 +26,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "prepublishOnly": "tsc && vitest run",
-    "setup": "node scripts/postinstall.cjs"
+    "prepublishOnly": "tsc && vitest run"
   },
   "devDependencies": {
     "@ai-sdk/openai-compatible": ">=1.0.0",
