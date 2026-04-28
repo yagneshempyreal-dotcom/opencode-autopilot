@@ -73,4 +73,52 @@ describe("parseRequest", () => {
     }, null);
     expect(result.sessionID).toMatch(/^session-/);
   });
+
+  it("detects /router goal cost", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "/router goal cost" }],
+    }, "s7");
+    expect(r.signals.goalSwitch).toBe("cost");
+  });
+
+  it("detects /router goal quality", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "please /router goal quality from now on" }],
+    }, "s8");
+    expect(r.signals.goalSwitch).toBe("quality");
+  });
+
+  it("detects /router goal balance", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "/router goal balance" }],
+    }, "s9");
+    expect(r.signals.goalSwitch).toBe("balance");
+  });
+
+  it("ignores invalid goal value", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "/router goal whatever" }],
+    }, "s10");
+    expect(r.signals.goalSwitch).toBeNull();
+  });
+
+  it("detects /router status", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "/router status" }],
+    }, "s11");
+    expect(r.signals.statusRequested).toBe(true);
+  });
+
+  it("detects /router models", () => {
+    const r = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "/router models" }],
+    }, "s12");
+    expect(r.signals.modelsRequested).toBe(true);
+  });
 });

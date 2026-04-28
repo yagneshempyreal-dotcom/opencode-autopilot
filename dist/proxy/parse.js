@@ -4,6 +4,9 @@ const SLASH_RESET_RE = /(?:^|\s)\/router\s+reset\b/i;
 const SLASH_AUTO_OFF_RE = /(?:^|\s)\/auto\s+off\b/i;
 const SLASH_AUTO_ON_RE = /(?:^|\s)\/auto\s+on\b/i;
 const SLASH_RESUME_RE = /(?:^|\s)\/router\s+resume\b/i;
+const SLASH_GOAL_RE = /(?:^|\s)\/router\s+goal\s+(cost|balance|quality)\b/i;
+const SLASH_STATUS_RE = /(?:^|\s)\/router\s+status\b/i;
+const SLASH_MODELS_RE = /(?:^|\s)\/router\s+models\b/i;
 const UPGRADE_PHRASES = [
     /\bthis is wrong\b/i,
     /\btry again\b/i,
@@ -22,6 +25,9 @@ export function parseRequest(raw, sessionIDHeader) {
         autoOff: false,
         autoOn: false,
         resumeRequested: false,
+        goalSwitch: null,
+        statusRequested: false,
+        modelsRequested: false,
     };
     if (lastUser >= 0) {
         const msg = messages[lastUser];
@@ -41,6 +47,14 @@ export function parseRequest(raw, sessionIDHeader) {
                 signals.autoOn = true;
             if (SLASH_RESUME_RE.test(txt))
                 signals.resumeRequested = true;
+            const goalMatch = SLASH_GOAL_RE.exec(txt);
+            if (goalMatch && goalMatch[1]) {
+                signals.goalSwitch = goalMatch[1].toLowerCase();
+            }
+            if (SLASH_STATUS_RE.test(txt))
+                signals.statusRequested = true;
+            if (SLASH_MODELS_RE.test(txt))
+                signals.modelsRequested = true;
             if (!signals.upgradeRequested) {
                 for (const re of UPGRADE_PHRASES)
                     if (re.test(txt)) {

@@ -13,6 +13,9 @@ export interface ParsedSignals {
   autoOff: boolean;
   autoOn: boolean;
   resumeRequested: boolean;
+  goalSwitch: "cost" | "balance" | "quality" | null;
+  statusRequested: boolean;
+  modelsRequested: boolean;
 }
 
 const OVERRIDE_RE = /(?:^|\s)@([\w./:-]+)\b/;
@@ -21,6 +24,9 @@ const SLASH_RESET_RE = /(?:^|\s)\/router\s+reset\b/i;
 const SLASH_AUTO_OFF_RE = /(?:^|\s)\/auto\s+off\b/i;
 const SLASH_AUTO_ON_RE = /(?:^|\s)\/auto\s+on\b/i;
 const SLASH_RESUME_RE = /(?:^|\s)\/router\s+resume\b/i;
+const SLASH_GOAL_RE = /(?:^|\s)\/router\s+goal\s+(cost|balance|quality)\b/i;
+const SLASH_STATUS_RE = /(?:^|\s)\/router\s+status\b/i;
+const SLASH_MODELS_RE = /(?:^|\s)\/router\s+models\b/i;
 
 const UPGRADE_PHRASES = [
   /\bthis is wrong\b/i,
@@ -41,6 +47,9 @@ export function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string
     autoOff: false,
     autoOn: false,
     resumeRequested: false,
+    goalSwitch: null,
+    statusRequested: false,
+    modelsRequested: false,
   };
 
   if (lastUser >= 0) {
@@ -56,6 +65,12 @@ export function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string
       if (SLASH_AUTO_OFF_RE.test(txt)) signals.autoOff = true;
       if (SLASH_AUTO_ON_RE.test(txt)) signals.autoOn = true;
       if (SLASH_RESUME_RE.test(txt)) signals.resumeRequested = true;
+      const goalMatch = SLASH_GOAL_RE.exec(txt);
+      if (goalMatch && goalMatch[1]) {
+        signals.goalSwitch = goalMatch[1].toLowerCase() as "cost" | "balance" | "quality";
+      }
+      if (SLASH_STATUS_RE.test(txt)) signals.statusRequested = true;
+      if (SLASH_MODELS_RE.test(txt)) signals.modelsRequested = true;
       if (!signals.upgradeRequested) {
         for (const re of UPGRADE_PHRASES) if (re.test(txt)) { signals.upgradeRequested = true; break; }
       }

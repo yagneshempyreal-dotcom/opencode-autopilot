@@ -13,6 +13,9 @@ export interface ParsedSignals {
     autoOff: boolean;
     autoOn: boolean;
     resumeRequested: boolean;
+    goalSwitch: "cost" | "balance" | "quality" | null;
+    statusRequested: boolean;
+    modelsRequested: boolean;
 }
 export declare function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string | null): ParsedRequest;
 export declare function lastUserIndex(messages: ChatMessage[]): number;

@@ -1,13 +1,14 @@
 import { logger } from "../util/log.js";
 import { classify } from "../classifier/index.js";
-import { decide, bumpStickyFloor } from "../policy/index.js";
+import { decide, bumpStickyFloor, GOAL_MATRIX } from "../policy/index.js";
 import { dispatch } from "../forwarder/index.js";
-import { findModel } from "../registry/index.js";
+import { findModel, modelsForTier } from "../registry/index.js";
 import { parseRequest } from "./parse.js";
 import { sseLines, extractDeltaText, extractUsage } from "./sse.js";
 import { formatBadge } from "../badge/format.js";
 import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
+import { saveConfig } from "../config/store.js";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 export async function handleChatCompletions(req, res, ctx) {
     const raw = await readJSON(req).catch((err) => {
@@ -34,6 +35,26 @@ export async function handleChatCompletions(req, res, ctx) {
         ctx.setAutoEnabled(false);
     if (parsed.signals.autoOn)
         ctx.setAutoEnabled(true);
+    if (parsed.signals.goalSwitch) {
+        const before = ctx.config.goal;
+        ctx.config.goal = parsed.signals.goalSwitch;
+        try {
+            await saveConfig(ctx.config);
+        }
+        catch (err) {
+            logger.warn("saveConfig failed after goal switch", { err: err.message });
+        }
+        respondInline(res, parsed.request.stream === true, formatGoalSwitchAck(before, ctx.config.goal, ctx));
+        return;
+    }
+    if (parsed.signals.statusRequested) {
+        respondInline(res, parsed.request.stream === true, formatStatus(ctx));
+        return;
+    }
+    if (parsed.signals.modelsRequested) {
+        respondInline(res, parsed.request.stream === true, formatModels(ctx));
+        return;
+    }
     if (!ctx.autoEnabled() && !parsed.override) {
         fail(res, 503, "router disabled (/auto off). Re-enable with /auto on.");
         return;
@@ -268,5 +289,94 @@ function prependBadgeToJSON(json, badge) {
     catch {
         return json;
     }
+}
+function respondInline(res, stream, text) {
+    if (stream) {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/event-stream");
+        res.setHeader("cache-control", "no-cache");
+        const id = `chatcmpl-router-${Date.now()}`;
+        const created = Math.floor(Date.now() / 1000);
+        const chunk = JSON.stringify({
+            id, object: "chat.completion.chunk", created, model: "openauto/auto",
+            choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }],
+        });
+        const done = JSON.stringify({
+            id, object: "chat.completion.chunk", created, model: "openauto/auto",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        });
+        res.write(`data: ${chunk}\n\n`);
+        res.write(`data: ${done}\n\n`);
+        res.write("data: [DONE]\n\n");
+        res.end();
+        return;
+    }
+    res.statusCode = 200;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+        id: `chatcmpl-router-${Date.now()}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: "openauto/auto",
+        choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    }));
+}
+function formatGoalSwitchAck(before, after, ctx) {
+    const lines = [
+        `**router goal: ${before} → ${after}**`,
+        "",
+        "Routing matrix for the new goal:",
+        ...goalMatrixPreview(after, ctx),
+        "",
+        "Tip: `/router status` to see current pick · `/router models` to list models per tier.",
+    ];
+    return lines.join("\n");
+}
+function formatStatus(ctx) {
+    const tierCounts = ["free", "cheap-paid", "top-paid"]
+        .map((t) => `${t}=${modelsForTier(ctx.registry, t).length}`)
+        .join("  ");
+    return [
+        `**router status**`,
+        ``,
+        `Goal:        ${ctx.config.goal}`,
+        `Auto:        ${ctx.autoEnabled() ? "on" : "off"}`,
+        `Triage:      ${ctx.config.triage.enabled ? "on" : "off"}`,
+        `Models:      ${tierCounts}`,
+        ``,
+        `Routing matrix for current goal:`,
+        ...goalMatrixPreview(ctx.config.goal, ctx),
+        ``,
+        `Switch goal: \`/router goal cost|balance|quality\``,
+    ].join("\n");
+}
+function formatModels(ctx) {
+    const lines = [`**available models**`, ``];
+    for (const tier of ["free", "cheap-paid", "top-paid"]) {
+        const ms = modelsForTier(ctx.registry, tier);
+        lines.push(`_${tier}_ (${ms.length}):`);
+        if (ms.length === 0) {
+            lines.push(`  · (none)`);
+            continue;
+        }
+        for (const m of ms.slice(0, 12))
+            lines.push(`  · ${m.provider}/${m.modelID}`);
+        if (ms.length > 12)
+            lines.push(`  · …+${ms.length - 12} more`);
+        lines.push("");
+    }
+    return lines.join("\n");
+}
+function goalMatrixPreview(goal, ctx) {
+    const row = GOAL_MATRIX[goal];
+    const out = [];
+    for (const c of ["low", "medium", "high"]) {
+        const tier = row[c];
+        const pool = modelsForTier(ctx.registry, tier);
+        const sample = pool[0] ? `${pool[0].provider}/${pool[0].modelID}` : "(no model in tier — will escalate)";
+        out.push(`  · ${c.padEnd(6)} → ${tier.padEnd(11)} → ${sample}`);
+    }
+    return out;
 }
 //# sourceMappingURL=routes.js.map
