@@ -19,4 +19,12 @@ export interface OpencodeProviderConfig {
     [k: string]: unknown;
 }
 export declare function loadOpencodeConfig(path?: string): Promise<OpencodeConfig>;
+export declare const ROUTER_PROVIDER_KEY = "openauto";
+export declare const ROUTER_MODEL_KEY = "auto";
+export interface EnsureRouterResult {
+    path: string;
+    patched: boolean;
+    reason: "missing-file" | "missing-provider" | "port-mismatch" | "already-correct";
+}
+export declare function ensureRouterProvider(port: number, path?: string): Promise<EnsureRouterResult>;
 //# sourceMappingURL=opencode.d.ts.map

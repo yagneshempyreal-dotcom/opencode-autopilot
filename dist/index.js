@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { loadConfig, saveConfig } from "./config/store.js";
 import { loadAuth } from "./config/auth.js";
-import { loadOpencodeConfig } from "./config/opencode.js";
+import { loadOpencodeConfig, ensureRouterProvider } from "./config/opencode.js";
 import { buildRegistry } from "./registry/index.js";
 import { startProxy } from "./proxy/server.js";
 import { ProxyEventBus } from "./proxy/context.js";
@@ -89,6 +89,18 @@ const plugin = async (_input) => {
                     requested: requestedPort,
                     ...(proxyHandle.port !== requestedPort ? { note: "fallback — not persisted" } : {}),
                 });
+                // Make sure opencode.json declares the openauto provider on the
+                // live port. Without this users don't see "OpenAuto Router" in
+                // the model picker — the in-memory config hook isn't enough on
+                // some opencode versions.
+                try {
+                    const r = await ensureRouterProvider(proxyHandle.port);
+                    if (r.patched)
+                        logger.info("patched opencode.json", { reason: r.reason, path: r.path });
+                }
+                catch (err) {
+                    logger.warn("failed to patch opencode.json", { err: err.message });
+                }
             }
             catch (err) {
                 logger.error("failed to start proxy", { err: err.message });
