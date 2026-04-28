@@ -18,7 +18,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "compile": "tsc",
     "watch": "tsc -w",
     "test": "vitest run",
     "test:watch": "vitest",
