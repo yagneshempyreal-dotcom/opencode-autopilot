@@ -9,7 +9,7 @@ import { ProxyEventBus } from "./proxy/context.js";
 import { logger } from "./util/log.js";
 import { autopilotLogPath } from "./util/paths.js";
 import { getLastHandover, readHandoverDoc } from "./handover/resume.js";
-import { loadHealth } from "./registry/health.js";
+import { loadHealth, saveHealth, verifyAll } from "./registry/health.js";
 // Top-level diagnostic: if we see this in autopilot.log, opencode imported our
 // module. If we see "plugin function called" later, opencode also invoked our
 // Plugin function. If both are missing, opencode never loaded the package.
@@ -94,6 +94,15 @@ const plugin = async (_input) => {
                 logger.error("failed to start proxy", { err: err.message });
             }
         }
+        // Background warm-up: if we have no fresh health data, probe every
+        // model now so the user's first prompt routes straight to a working
+        // model instead of cascading through dead ones. Doesn't block
+        // plugin init — runs detached.
+        queueMicrotask(() => {
+            void warmHealthIfStale(ctx).catch((err) => {
+                logger.warn("background verify failed", { err: err.message });
+            });
+        });
         events.on((e) => {
             if (e.type === "handover")
                 logger.info("handover signal", e);
@@ -164,6 +173,39 @@ const plugin = async (_input) => {
         return {};
     }
 };
+// Probe every registry model in the background if health data is empty or
+// older than 6h. After the probe, auto-pin the OK set so the first real
+// request goes directly to a working model without cascading.
+async function warmHealthIfStale(ctx) {
+    if (ctx.registry.models.length === 0)
+        return;
+    const STALE_MS = 6 * 60 * 60 * 1000;
+    const records = Object.values(ctx.health.records);
+    const newest = records.reduce((acc, r) => Math.max(acc, r.lastChecked), 0);
+    const stale = records.length === 0 || Date.now() - newest > STALE_MS;
+    if (!stale)
+        return;
+    logger.info("background verify starting", { models: ctx.registry.models.length });
+    const report = await verifyAll(ctx.registry.models, ctx.auth, ctx.health, {
+        concurrency: 4,
+        timeoutMs: 8000,
+    });
+    await saveHealth(ctx.health).catch(() => { });
+    // Auto-pin only when the user hasn't already curated a list.
+    const userPinned = (ctx.config.allowlist?.length ?? 0) > 0 &&
+        !ctx.config.allowlist?.every((id) => report.ok.includes(id) || ctx.health.records[id]?.status === "down");
+    if (!userPinned && report.ok.length > 0) {
+        ctx.config.allowlist = report.ok;
+        await saveConfig(ctx.config).catch(() => { });
+        logger.info("auto-pinned ok models", { count: report.ok.length });
+    }
+    logger.info("background verify done", {
+        ok: report.ok.length,
+        down: report.down.length,
+        pinned: ctx.config.allowlist?.length ?? 0,
+        durationMs: report.durationMs,
+    });
+}
 async function loadRecentModels() {
     try {
         const { readFile } = await import("node:fs/promises");

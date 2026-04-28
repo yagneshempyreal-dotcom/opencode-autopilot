@@ -405,6 +405,15 @@ async function runVerify(ctx) {
         return "(no models in registry — run `opencode-openauto init`)";
     const report = await verifyAll(models, ctx.auth, ctx.health, { concurrency: 4, timeoutMs: 8000 });
     await saveHealth(ctx.health).catch(() => { });
+    // Auto-pin the OK set so the next request goes straight to a working
+    // model — no cascade through the dead ones. User can override with
+    // `router pick clear` or a manual list.
+    let autoPinned = false;
+    if (report.ok.length > 0) {
+        ctx.config.allowlist = report.ok;
+        await saveConfig(ctx.config).catch(() => { });
+        autoPinned = true;
+    }
     const lines = [
         `**router verify** (${(report.durationMs / 1000).toFixed(1)}s)`,
         "",
@@ -427,7 +436,13 @@ async function runVerify(ctx) {
             lines.push(`  ✗ ${d.id}  (status=${d.status}${d.error ? ` · ${d.error.slice(0, 60)}` : ""})`);
         lines.push("");
     }
-    lines.push("Pin only the working ones:", "  router pick all-ok                     # everything that just passed", "  router pick provider/m1, provider/m2   # specific list", "  router pick clear                      # remove the pin (use full registry)");
+    if (autoPinned) {
+        lines.push(`✓ auto-pinned ${report.ok.length} model(s) — routing will only use these.`);
+        lines.push("Override anytime: `router pick clear` (use full registry) or `router pick a/b, c/d` (custom).");
+    }
+    else {
+        lines.push("Pin manually: `router pick provider/m1, provider/m2`");
+    }
     return lines.join("\n");
 }
 function formatHealth(ctx) {
