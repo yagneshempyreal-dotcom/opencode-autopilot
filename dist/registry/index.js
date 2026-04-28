@@ -1,4 +1,4 @@
-import { classifyModel, inferCtxWindow, inferApiShape, isFlaggedAsUnknown } from "./classify.js";
+import { classifyModel, inferCtxWindow, inferApiShape, isFlaggedAsUnknown, inferTags } from "./classify.js";
 const PROVIDER_BASE_URLS = {
     openai: "https://api.openai.com/v1",
     anthropic: "https://api.anthropic.com/v1",
@@ -84,6 +84,7 @@ function buildEntry(provider, modelID, opencodeCfg) {
         supportsStreaming: true,
         apiShape: inferApiShape(provider),
         baseURL,
+        tags: inferTags(provider, modelID),
     };
 }
 export function modelsForTier(reg, tier) {

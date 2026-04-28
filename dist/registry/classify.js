@@ -77,4 +77,22 @@ export function isFlaggedAsUnknown(provider, modelID) {
         return false;
     return true;
 }
+const TAG_PATTERNS = [
+    { tag: "code", re: /\b(?:codex|coder|code-fast|code\b|deepseek-(?:v\d|coder))\b/i },
+    { tag: "reasoning", re: /\b(?:reasoner|o1|o3|opus|glm-4-plus|glm-5\b|deep-?think|reasoning)\b/i },
+    { tag: "math", re: /\b(?:reasoner|o1|o3|math|deepseek-r|deepseek-reasoner|qwen-?math)\b/i },
+    { tag: "vision", re: /\b(?:vision|-?v(?:l|ision)?\b|gpt-?4o(?!-mini)|claude-(?:opus|sonnet)-[0-9]|gemini-(?:1\.5|2)-pro|glm-5v|-vl-)/i },
+    { tag: "fast", re: /\b(?:mini|nano|tiny|small|haiku|flash|turbo|fast)\b/i },
+    { tag: "long-ctx", re: /\b(?:1m|200k|128k|sonnet|opus|gemini|gpt-?5(?!\.\d-mini|\.\d-nano))\b/i },
+];
+export function inferTags(provider, modelID) {
+    const hay = `${provider}/${modelID}`;
+    const tags = [];
+    for (const { tag, re } of TAG_PATTERNS)
+        if (re.test(hay))
+            tags.push(tag);
+    if (tags.length === 0)
+        tags.push("chat");
+    return tags;
+}
 //# sourceMappingURL=classify.js.map

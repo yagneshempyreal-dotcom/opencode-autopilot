@@ -16,6 +16,9 @@ export interface ParsedSignals {
     goalSwitch: "cost" | "balance" | "quality" | null;
     statusRequested: boolean;
     modelsRequested: boolean;
+    verifyRequested: boolean;
+    pickArg: string | null;
+    healthRequested: boolean;
 }
 export declare function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string | null): ParsedRequest;
 export declare function lastUserIndex(messages: ChatMessage[]): number;

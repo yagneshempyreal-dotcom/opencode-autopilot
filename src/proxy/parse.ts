@@ -16,6 +16,9 @@ export interface ParsedSignals {
   goalSwitch: "cost" | "balance" | "quality" | null;
   statusRequested: boolean;
   modelsRequested: boolean;
+  verifyRequested: boolean;
+  pickArg: string | null;
+  healthRequested: boolean;
 }
 
 const OVERRIDE_RE = /(?:^|\s)@([\w./:-]+)\b/;
@@ -34,6 +37,10 @@ const SLASH_RESUME_RE = new RegExp(`${ROUTER_PREFIX}\\s+resume\\b`, "i");
 const SLASH_GOAL_RE = new RegExp(`${ROUTER_PREFIX}\\s+goal\\s+(cost|balance|quality)\\b`, "i");
 const SLASH_STATUS_RE = new RegExp(`${ROUTER_PREFIX}\\s+status\\b`, "i");
 const SLASH_MODELS_RE = new RegExp(`${ROUTER_PREFIX}\\s+models\\b`, "i");
+const SLASH_VERIFY_RE = new RegExp(`${ROUTER_PREFIX}\\s+verify\\b`, "i");
+const SLASH_HEALTH_RE = new RegExp(`${ROUTER_PREFIX}\\s+health\\b`, "i");
+// "router pick all-ok" | "router pick clear" | "router pick a/b, c/d, ..."
+const SLASH_PICK_RE = new RegExp(`${ROUTER_PREFIX}\\s+pick\\s+(.+)$`, "i");
 // Upgrade / auto kept under the router umbrella too. Legacy "/upgrade" and
 // "/auto on|off" still match anywhere in message (whitespace-preceded) since
 // "/" is unambiguous; new bare "router upgrade" form is anchored to start.
@@ -63,6 +70,9 @@ export function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string
     goalSwitch: null,
     statusRequested: false,
     modelsRequested: false,
+    verifyRequested: false,
+    pickArg: null,
+    healthRequested: false,
   };
 
   if (lastUser >= 0) {
@@ -84,6 +94,10 @@ export function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string
       }
       if (SLASH_STATUS_RE.test(txt)) signals.statusRequested = true;
       if (SLASH_MODELS_RE.test(txt)) signals.modelsRequested = true;
+      if (SLASH_VERIFY_RE.test(txt)) signals.verifyRequested = true;
+      if (SLASH_HEALTH_RE.test(txt)) signals.healthRequested = true;
+      const pickMatch = SLASH_PICK_RE.exec(txt);
+      if (pickMatch && pickMatch[1]) signals.pickArg = pickMatch[1].trim();
       if (!signals.upgradeRequested) {
         for (const re of UPGRADE_PHRASES) if (re.test(txt)) { signals.upgradeRequested = true; break; }
       }

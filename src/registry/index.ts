@@ -1,6 +1,6 @@
 import type { ModelEntry, Tier, OpenCodeAuth } from "../types.js";
 import type { OpencodeConfig } from "../config/opencode.js";
-import { classifyModel, inferCtxWindow, inferApiShape, isFlaggedAsUnknown } from "./classify.js";
+import { classifyModel, inferCtxWindow, inferApiShape, isFlaggedAsUnknown, inferTags } from "./classify.js";
 
 export interface Registry {
   models: ModelEntry[];
@@ -97,6 +97,7 @@ function buildEntry(provider: string, modelID: string, opencodeCfg: OpencodeConf
     supportsStreaming: true,
     apiShape: inferApiShape(provider),
     baseURL,
+    tags: inferTags(provider, modelID),
   };
 }
 

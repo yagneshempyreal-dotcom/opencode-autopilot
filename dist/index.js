@@ -9,6 +9,7 @@ import { ProxyEventBus } from "./proxy/context.js";
 import { logger } from "./util/log.js";
 import { autopilotLogPath } from "./util/paths.js";
 import { getLastHandover, readHandoverDoc } from "./handover/resume.js";
+import { loadHealth } from "./registry/health.js";
 // Top-level diagnostic: if we see this in autopilot.log, opencode imported our
 // module. If we see "plugin function called" later, opencode also invoked our
 // Plugin function. If both are missing, opencode never loaded the package.
@@ -42,11 +43,12 @@ const plugin = async (_input) => {
             }) + "\n");
         }
         catch { /* */ }
-        const [config, auth, opencodeCfg, recentModels] = await Promise.all([
+        const [config, auth, opencodeCfg, recentModels, health] = await Promise.all([
             loadConfig(),
             loadAuth(),
             loadOpencodeConfig(),
             loadRecentModels(),
+            loadHealth(),
         ]);
         const registry = buildRegistry({
             auth,
@@ -64,6 +66,7 @@ const plugin = async (_input) => {
             events,
             autoEnabled: () => autoEnabled,
             setAutoEnabled: (v) => { autoEnabled = v; },
+            health,
         };
         if (registry.models.length === 0) {
             logger.warn("registry empty — autopilot will not route. run `opencode-openauto init` first.");

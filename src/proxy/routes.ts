@@ -10,6 +10,8 @@ import { formatBadge } from "../badge/format.js";
 import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
 import { saveConfig } from "../config/store.js";
+import { extractTaskTags } from "../classifier/tags.js";
+import { saveHealth, verifyAll } from "../registry/health.js";
 import type { ProxyContext } from "./context.js";
 import type { ChatCompletionRequest, Goal, Tier } from "../types.js";
 
@@ -61,6 +63,20 @@ export async function handleChatCompletions(
     respondInline(res, parsed.request.stream === true, formatModels(ctx));
     return;
   }
+  if (parsed.signals.verifyRequested) {
+    const text = await runVerify(ctx);
+    respondInline(res, parsed.request.stream === true, text);
+    return;
+  }
+  if (parsed.signals.healthRequested) {
+    respondInline(res, parsed.request.stream === true, formatHealth(ctx));
+    return;
+  }
+  if (parsed.signals.pickArg) {
+    const text = await applyPick(ctx, parsed.signals.pickArg);
+    respondInline(res, parsed.request.stream === true, text);
+    return;
+  }
 
   if (!ctx.autoEnabled() && !parsed.override) {
     fail(res, 503, "router disabled (/auto off). Re-enable with /auto on.");
@@ -94,6 +110,7 @@ export async function handleChatCompletions(
   if (stickyBumpedTo) setStickyFloor(parsed.sessionID, stickyBumpedTo);
 
   const estimatedTokens = estimateRequestTokens(parsed.request.messages);
+  const taskTags = extractTaskTags(parsed.request.messages);
 
   const decision = decide({
     classification,
@@ -102,6 +119,8 @@ export async function handleChatCompletions(
     stickyFloor: getSession(parsed.sessionID).stickyFloor,
     override: parsed.override,
     estimatedTokens,
+    health: ctx.health,
+    taskTags,
   });
 
   if (!decision) {
@@ -162,7 +181,10 @@ export async function handleChatCompletions(
       registry: ctx.registry,
       auth: ctx.auth,
       allowEscalation: !parsed.override,
+      health: ctx.health,
     });
+    // Persist any health updates made during dispatch (best-effort).
+    saveHealth(ctx.health).catch((e) => logger.warn("saveHealth failed", { err: (e as Error).message }));
   } catch (err) {
     logger.error("dispatch failed", { err: (err as Error).message });
     fail(res, 502, `dispatch failed: ${(err as Error).message}`);
@@ -375,6 +397,9 @@ function formatStatus(ctx: ProxyContext): string {
   const tierCounts = (["free", "cheap-paid", "top-paid"] as Tier[])
     .map((t) => `${t}=${modelsForTier(ctx.registry, t).length}`)
     .join("  ");
+  const okCount = Object.values(ctx.health.records).filter((r) => r.status === "ok").length;
+  const downCount = Object.values(ctx.health.records).filter((r) => r.status === "down").length;
+  const allow = ctx.config.allowlist ?? [];
   return [
     `**router status**`,
     ``,
@@ -382,11 +407,17 @@ function formatStatus(ctx: ProxyContext): string {
     `Auto:        ${ctx.autoEnabled() ? "on" : "off"}`,
     `Triage:      ${ctx.config.triage.enabled ? "on" : "off"}`,
     `Models:      ${tierCounts}`,
+    `Health:      ok=${okCount}  down=${downCount}  unprobed=${ctx.registry.models.length - okCount - downCount}`,
+    `Pinned:      ${allow.length === 0 ? "(none — using full registry)" : `${allow.length} model(s)`}`,
     ``,
     `Routing matrix for current goal:`,
     ...goalMatrixPreview(ctx.config.goal, ctx),
     ``,
-    `Switch goal: \`router goal cost|balance|quality\` (bare; no prefix needed)`,
+    `Commands:`,
+    `  router verify                          probe every model & save health`,
+    `  router pick all-ok | <id,id,...> | clear   pin which models routing may use`,
+    `  router health                          show last-known health`,
+    `  router goal cost|balance|quality       switch routing strategy`,
   ].join("\n");
 }
 
@@ -401,6 +432,104 @@ function formatModels(ctx: ProxyContext): string {
     lines.push("");
   }
   return lines.join("\n");
+}
+
+async function runVerify(ctx: ProxyContext): Promise<string> {
+  const models = ctx.registry.models;
+  if (models.length === 0) return "(no models in registry — run `opencode-openauto init`)";
+  const report = await verifyAll(models, ctx.auth, ctx.health, { concurrency: 4, timeoutMs: 8000 });
+  await saveHealth(ctx.health).catch(() => {});
+  const lines: string[] = [
+    `**router verify** (${(report.durationMs / 1000).toFixed(1)}s)`,
+    "",
+    `OK    ${report.ok.length}/${report.total}`,
+    `Down  ${report.down.length}/${report.total}`,
+    "",
+  ];
+  if (report.ok.length > 0) {
+    lines.push("_working_:");
+    for (const id of report.ok) {
+      const m = ctx.registry.byID.get(id);
+      const tagstr = m && m.tags.length > 0 ? `  [${m.tags.join(",")}]` : "";
+      lines.push(`  ✓ ${id}${tagstr}`);
+    }
+    lines.push("");
+  }
+  if (report.down.length > 0) {
+    lines.push("_failing_:");
+    for (const d of report.down) lines.push(`  ✗ ${d.id}  (status=${d.status}${d.error ? ` · ${d.error.slice(0, 60)}` : ""})`);
+    lines.push("");
+  }
+  lines.push(
+    "Pin only the working ones:",
+    "  router pick all-ok                     # everything that just passed",
+    "  router pick provider/m1, provider/m2   # specific list",
+    "  router pick clear                      # remove the pin (use full registry)",
+  );
+  return lines.join("\n");
+}
+
+function formatHealth(ctx: ProxyContext): string {
+  const records = Object.entries(ctx.health.records);
+  if (records.length === 0) return "(no health records yet — run `router verify`)";
+  records.sort(([a], [b]) => a.localeCompare(b));
+  const lines = [`**health** (${records.length} records)`, ""];
+  for (const [id, r] of records) {
+    const ageMs = Date.now() - r.lastChecked;
+    const age = ageMs < 60000 ? `${Math.round(ageMs / 1000)}s` : `${Math.round(ageMs / 60000)}m`;
+    const sym = r.status === "ok" ? "✓" : r.status === "down" ? "✗" : "?";
+    const lat = r.latencyMs ? ` ${r.latencyMs}ms` : "";
+    const reason = r.lastError ? `  ${r.lastError.slice(0, 60)}` : "";
+    lines.push(`  ${sym} ${id}${lat}  (checked ${age} ago)${reason}`);
+  }
+  return lines.join("\n");
+}
+
+async function applyPick(ctx: ProxyContext, arg: string): Promise<string> {
+  const trimmed = arg.trim();
+  if (/^clear$|^reset$|^none$/i.test(trimmed)) {
+    ctx.config.allowlist = [];
+    await saveConfig(ctx.config);
+    return "**router pick: cleared.** Full registry is now eligible.";
+  }
+  let picks: string[];
+  if (/^all-?ok$/i.test(trimmed)) {
+    picks = Object.entries(ctx.health.records)
+      .filter(([, r]) => r.status === "ok")
+      .map(([id]) => id);
+    if (picks.length === 0) return "No models with status=ok found. Run `router verify` first.";
+  } else {
+    picks = trimmed.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  }
+  // Validate against registry.
+  const valid: string[] = [];
+  const invalid: string[] = [];
+  for (const id of picks) {
+    if (ctx.registry.byID.has(id)) valid.push(id);
+    else invalid.push(id);
+  }
+  if (valid.length === 0) {
+    return [
+      "**router pick: no valid model IDs.**",
+      "Use `provider/modelID` form (e.g. `openai/gpt-5.4-mini`).",
+      "Run `router models` to see the registry.",
+    ].join("\n");
+  }
+  ctx.config.allowlist = valid;
+  await saveConfig(ctx.config);
+  const out = [
+    `**router pick: pinned ${valid.length} model(s)**`,
+    "",
+    ...valid.map((id) => `  · ${id}`),
+  ];
+  if (invalid.length > 0) {
+    out.push("");
+    out.push(`Skipped (not in registry): ${invalid.join(", ")}`);
+  }
+  out.push("");
+  out.push("Switch goal: `router goal cost|balance|quality`");
+  out.push("Re-verify any time: `router verify`");
+  return out.join("\n");
 }
 
 function goalMatrixPreview(goal: Goal, ctx: ProxyContext): string[] {

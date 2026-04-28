@@ -365,14 +365,19 @@ async function runRefresh(args) {
 Ready. Start opencode in your terminal:
   $ opencode
 
-Then in the TUI:
-  · model picker → "OpenAuto / OpenAuto Router"
-  · type plain (no leading "/" or "!" — opencode TUI eats those):
-       router status
-       router goal balance        router goal cost
-       router goal quality        router models
-       router upgrade             router reset
-       router auto on             router auto off
+Then in the TUI (model picker → "OpenAuto / OpenAuto Router"), type plain
+text — no leading "/" or "!" since opencode TUI captures those:
+
+  router verify                  probe every model, mark working / dead
+  router pick all-ok             pin all models that just passed
+  router pick a/b, c/d           pin a specific list (provider/modelID)
+  router pick clear              remove the pin (use full registry)
+  router health                  show last-known per-model health
+  router status                  goal + health + matrix summary
+  router goal cost|balance|quality   switch routing strategy
+  router models                  list models per tier
+  router upgrade / router reset  bump / reset session sticky floor
+  router auto on / router auto off   enable / disable router
 `);
 }
 async function detectOpencodePids() {

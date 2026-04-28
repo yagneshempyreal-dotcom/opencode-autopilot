@@ -1,6 +1,7 @@
 import type { ChatCompletionRequest, OpenCodeAuth, RouteDecision } from "../types.js";
 import type { Registry } from "../registry/index.js";
 import type { ForwardResult } from "./types.js";
+import type { HealthStore } from "../registry/health.js";
 export interface DispatchInput {
     decision: RouteDecision;
     request: ChatCompletionRequest;
@@ -8,6 +9,7 @@ export interface DispatchInput {
     auth: OpenCodeAuth;
     signal?: AbortSignal;
     allowEscalation: boolean;
+    health?: HealthStore;
 }
 export interface DispatchResult extends ForwardResult {
     attempts: Array<{

@@ -1,6 +1,7 @@
 export type Tier = "free" | "cheap-paid" | "top-paid";
 export type Goal = "cost" | "quality" | "balance" | "custom";
 export type Complexity = "low" | "medium" | "high";
+export type Tag = "code" | "reasoning" | "math" | "vision" | "fast" | "long-ctx" | "chat";
 export interface ModelEntry {
     provider: string;
     modelID: string;
@@ -9,11 +10,13 @@ export interface ModelEntry {
     supportsStreaming: boolean;
     apiShape: "openai" | "anthropic" | "openrouter" | "opencode";
     baseURL?: string;
+    tags: Tag[];
 }
 export interface AutopilotConfig {
     goal: Goal;
     customMapping?: Record<Complexity, string>;
     tiers: Record<Tier, string[]>;
+    allowlist?: string[];
     proxy: {
         port: number;
         host: string;

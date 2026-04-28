@@ -10,6 +10,7 @@ import { ProxyEventBus, type ProxyContext } from "./proxy/context.js";
 import { logger } from "./util/log.js";
 import { autopilotLogPath } from "./util/paths.js";
 import { getLastHandover, readHandoverDoc } from "./handover/resume.js";
+import { loadHealth } from "./registry/health.js";
 import type { ModelEntry } from "./types.js";
 
 // Top-level diagnostic: if we see this in autopilot.log, opencode imported our
@@ -46,11 +47,12 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
         pid: process.pid,
       }) + "\n");
     } catch { /* */ }
-    const [config, auth, opencodeCfg, recentModels] = await Promise.all([
+    const [config, auth, opencodeCfg, recentModels, health] = await Promise.all([
       loadConfig(),
       loadAuth(),
       loadOpencodeConfig(),
       loadRecentModels(),
+      loadHealth(),
     ]);
 
     const registry = buildRegistry({
@@ -70,6 +72,7 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
       events,
       autoEnabled: () => autoEnabled,
       setAutoEnabled: (v) => { autoEnabled = v; },
+      health,
     };
 
     if (registry.models.length === 0) {

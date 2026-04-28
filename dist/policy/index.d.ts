@@ -1,5 +1,6 @@
-import type { AutopilotConfig, ClassifierResult, Complexity, Goal, RouteDecision, Tier } from "../types.js";
+import type { AutopilotConfig, ClassifierResult, Complexity, Goal, RouteDecision, Tag, Tier } from "../types.js";
 import type { Registry } from "../registry/index.js";
+import type { HealthStore } from "../registry/health.js";
 export interface PolicyInput {
     classification: ClassifierResult;
     config: AutopilotConfig;
@@ -9,6 +10,8 @@ export interface PolicyInput {
         modelRef: string;
     } | null;
     estimatedTokens: number;
+    health?: HealthStore;
+    taskTags?: Tag[];
 }
 export declare const GOAL_MATRIX: Record<Goal, Record<Complexity, Tier>>;
 export declare const TIER_ESCALATION: Tier[];
