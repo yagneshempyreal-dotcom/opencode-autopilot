@@ -1,4 +1,4 @@
-import type { ChatCompletionRequest, OpenCodeAuth, RouteDecision } from "../types.js";
+import type { ChatCompletionRequest, ModelEntry, OpenCodeAuth, RouteDecision } from "../types.js";
 import type { Registry } from "../registry/index.js";
 import type { ForwardResult } from "./types.js";
 import type { HealthStore } from "../registry/health.js";
@@ -22,4 +22,5 @@ export interface DispatchResult extends ForwardResult {
     escalated: boolean;
 }
 export declare function dispatch(input: DispatchInput): Promise<DispatchResult>;
+export declare function injectIdentityPrompt(request: ChatCompletionRequest, model: ModelEntry): ChatCompletionRequest;
 //# sourceMappingURL=index.d.ts.map

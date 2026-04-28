@@ -45,7 +45,7 @@ export async function dispatch(input) {
             try {
                 const fwd = FORWARDERS[candidate.apiShape];
                 const result = await fwd({
-                    request: input.request,
+                    request: injectIdentityPrompt(input.request, candidate),
                     model: candidate,
                     auth: input.auth,
                     signal: ctrl.signal,
@@ -77,6 +77,42 @@ export async function dispatch(input) {
             escalated = true;
     }
     throw new ForwardError(503, `all candidates failed: ${JSON.stringify(attempts)}`, false);
+}
+// Models hallucinate their own identity — they'll claim to be Claude or
+// GPT-4 based on training, not on what's actually serving the request.
+// Inject a system message that tells the model exactly which provider
+// and model ID is running, and instructs it to be factual about that.
+// Also forbids fabricating attribution for other models' work.
+export function injectIdentityPrompt(request, model) {
+    const identityNote = [
+        `[router metadata: this turn is being executed by model "${model.provider}/${model.modelID}" via openauto router.]`,
+        `If the user asks which model you are, answer truthfully with the id above.`,
+        `Do NOT claim to be a different model (Claude, GPT-4, Gemini, etc.) unless that is literally your provider/modelID.`,
+        `Do NOT fabricate authorship attributions: if asked to label content with a model name, only use "${model.provider}/${model.modelID}" — never invent other model names you didn't run.`,
+        `If the user asks for "different models" to write content, explain that you can only speak as yourself; the router can call other models in separate turns.`,
+    ].join(" ");
+    const messages = request.messages ?? [];
+    // If there's already a system message, append to it; else insert one.
+    const firstSystemIdx = messages.findIndex((m) => m && m.role === "system");
+    if (firstSystemIdx >= 0) {
+        const existing = messages[firstSystemIdx];
+        const existingText = typeof existing.content === "string"
+            ? existing.content
+            : (existing.content ?? []).map((p) => p.text ?? "").join("\n");
+        // Don't double-inject — this can be called multiple times in a retry loop.
+        if (existingText.includes("router metadata:"))
+            return request;
+        return {
+            ...request,
+            messages: messages.map((m, i) => i === firstSystemIdx
+                ? { ...m, content: `${existingText}\n\n${identityNote}` }
+                : m),
+        };
+    }
+    return {
+        ...request,
+        messages: [{ role: "system", content: identityNote }, ...messages],
+    };
 }
 function lowerTiers(start) {
     const all = ["free", "cheap-paid", "top-paid"];
