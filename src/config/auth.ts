@@ -28,8 +28,14 @@ export function bearerToken(entry: AuthEntry | null): string | null {
   if (!entry) return null;
   if (entry.type === "api" || entry.type === "wellknown") return entry.key;
   if (entry.type === "oauth") {
-    // expires is in ms-since-epoch; treat as expired with 30s safety margin.
-    if (typeof entry.expires === "number" && entry.expires - Date.now() < 30_000) return null;
+    // `expires` should be ms-since-epoch, but some providers / older formats may
+    // store it in seconds. Heuristic: anything "small" (< 1e12) is treated
+    // as seconds and converted to ms.
+    if (typeof entry.expires === "number") {
+      const expiresMs = oauthExpiresMs(entry.expires);
+      // Treat as expired with 30s safety margin.
+      if (expiresMs - Date.now() < 30_000) return null;
+    }
     return entry.access;
   }
   return null;
@@ -37,5 +43,13 @@ export function bearerToken(entry: AuthEntry | null): string | null {
 
 export function isOAuthExpired(entry: AuthEntry | null): boolean {
   if (!entry || entry.type !== "oauth") return false;
-  return typeof entry.expires === "number" && entry.expires - Date.now() < 30_000;
+  if (typeof entry.expires !== "number") return false;
+  return oauthExpiresMs(entry.expires) - Date.now() < 30_000;
+}
+
+function oauthExpiresMs(expires: number): number {
+  if (!Number.isFinite(expires)) return NaN;
+  // Current epoch seconds are ~1_700_000_000; current epoch millis are ~1_700_000_000_000.
+  // 1e12 is a safe divider between those scales.
+  return expires < 1e12 ? expires * 1000 : expires;
 }

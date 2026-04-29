@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from "../../src/config/store.js";
-import { loadAuth, getCredential, bearerToken } from "../../src/config/auth.js";
+import { loadAuth, getCredential, bearerToken, isOAuthExpired } from "../../src/config/auth.js";
 
 describe("config store", () => {
   let dir: string;
@@ -86,5 +86,19 @@ describe("auth", () => {
   it("bearerToken returns null for expired OAuth tokens", () => {
     const expired = { type: "oauth" as const, access: "tok-stale", refresh: "ref", expires: 1 };
     expect(bearerToken(expired)).toBeNull();
+  });
+
+  it("treats OAuth expires as seconds when it's a small epoch", () => {
+    const expiresSeconds = Math.floor(Date.now() / 1000) + 60 * 60; // 1h in the future (seconds)
+    const oauth = { type: "oauth" as const, access: "tok-ok", refresh: "ref", expires: expiresSeconds };
+    expect(bearerToken(oauth)).toBe("tok-ok");
+    expect(isOAuthExpired(oauth)).toBe(false);
+  });
+
+  it("marks OAuth seconds tokens as expired near the 30s safety margin", () => {
+    const expiresSeconds = Math.floor(Date.now() / 1000) + 10; // within 30s safety margin
+    const oauth = { type: "oauth" as const, access: "tok-near-expiry", refresh: "ref", expires: expiresSeconds };
+    expect(isOAuthExpired(oauth)).toBe(true);
+    expect(bearerToken(oauth)).toBeNull();
   });
 });
