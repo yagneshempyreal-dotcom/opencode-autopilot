@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sseLines, extractDeltaText, extractUsage } from "../../src/proxy/sse.js";
+import { sseLines, extractDeltaText, extractUsage, extractFinishReason } from "../../src/proxy/sse.js";
 
 function streamFrom(chunks: string[]): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -57,5 +57,18 @@ describe("extractUsage", () => {
 
   it("returns null when usage absent", () => {
     expect(extractUsage(`data: ${JSON.stringify({ choices: [] })}`)).toBeNull();
+  });
+});
+
+describe("extractFinishReason", () => {
+  it("returns finish_reason when present", () => {
+    const line = `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}`;
+    expect(extractFinishReason(line)).toBe("length");
+  });
+
+  it("returns null when absent or non-data", () => {
+    expect(extractFinishReason(`data: ${JSON.stringify({ choices: [{ delta: { content: "x" } }] })}`)).toBeNull();
+    expect(extractFinishReason("data: [DONE]")).toBeNull();
+    expect(extractFinishReason(": ping")).toBeNull();
   });
 });

@@ -54,3 +54,15 @@ export function extractUsage(line: string): { in: number; out: number } | null {
     return null;
   }
 }
+
+export function extractFinishReason(line: string): string | null {
+  if (!line.startsWith("data:")) return null;
+  const payload = line.slice(5).trim();
+  if (!payload || payload === "[DONE]") return null;
+  try {
+    const parsed = JSON.parse(payload) as OpenAIDelta;
+    return parsed.choices?.[0]?.finish_reason ?? null;
+  } catch {
+    return null;
+  }
+}

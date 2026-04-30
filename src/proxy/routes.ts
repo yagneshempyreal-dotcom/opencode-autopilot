@@ -5,14 +5,14 @@ import { decide, bumpStickyFloor, GOAL_MATRIX } from "../policy/index.js";
 import { dispatch } from "../forwarder/index.js";
 import { findModel, modelsForTier } from "../registry/index.js";
 import { parseRequest } from "./parse.js";
-import { sseLines, extractDeltaText, extractUsage } from "./sse.js";
+import { sseLines, extractDeltaText, extractUsage, extractFinishReason } from "./sse.js";
 import { formatBadge } from "../badge/format.js";
 import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
 import { saveConfig } from "../config/store.js";
 import { loadAuth } from "../config/auth.js";
 import { extractTaskTags } from "../classifier/tags.js";
-import { saveHealth, verifyAll } from "../registry/health.js";
+import { saveHealth, verifyAll, key as healthKey } from "../registry/health.js";
 import type { ProxyContext } from "./context.js";
 import type { ChatCompletionRequest, Goal, Tier } from "../types.js";
 
@@ -257,7 +257,20 @@ export async function handleChatCompletions(
   }
 
   if (isStream) {
-    await streamThrough(res, dispatchResult.body, badge, parsed.sessionID, decision.modelID, estimatedTokens);
+    await streamWithContinuation({
+      res,
+      ctx,
+      initialBody: dispatchResult.body,
+      initialModelID: decision.modelID,
+      initialProvider: decision.provider,
+      badge,
+      sessionID: parsed.sessionID,
+      estimatedIn: estimatedTokens,
+      baseRequest: parsed.request,
+      decision,
+      allowEscalation: !parsed.override,
+      override: parsed.override,
+    });
     return;
   }
 
@@ -349,6 +362,149 @@ async function streamThrough(
   }
   if (!usageReported) recordUsage(sessionID, estimatedIn, outTokens, modelID);
   res.end();
+}
+
+const MAX_CONTINUATION_HOPS = 2;
+
+async function streamWithContinuation(input: {
+  res: ServerResponse;
+  ctx: ProxyContext;
+  initialBody: ReadableStream<Uint8Array>;
+  initialProvider: string;
+  initialModelID: string;
+  badge: string | null;
+  sessionID: string;
+  estimatedIn: number;
+  baseRequest: ChatCompletionRequest;
+  decision: { provider: string; modelID: string; tier: Tier; reason: string; escalated: boolean; override: boolean };
+  allowEscalation: boolean;
+  override: { modelRef: string } | null;
+}): Promise<void> {
+  const { res, ctx, sessionID, estimatedIn } = input;
+  const baseMessages = input.baseRequest.messages;
+  let hop = 0;
+  let badgeSent = false;
+  let accumulated = "";
+  const excluded = new Set<string>();
+
+  let currentBody: ReadableStream<Uint8Array> | null = input.initialBody;
+  let currentModelKey = `${input.initialProvider}/${input.initialModelID}`;
+  let currentModelIDForUsage = input.initialModelID;
+  let currentEstimatedIn = estimatedIn;
+
+  while (currentBody) {
+    const out = await pipeSSEOnce({
+      res,
+      body: currentBody,
+      badge: input.badge,
+      badgeSent,
+      sessionID,
+      modelID: currentModelIDForUsage,
+      estimatedIn: currentEstimatedIn,
+      onDelta: (d) => { accumulated += d; },
+    });
+    badgeSent = out.badgeSent;
+
+    if (out.finishReason !== "length") {
+      // Normal termination (or unknown) — forward the final chunk + DONE.
+      if (out.finalLine) {
+        res.write(`${out.finalLine}\n`);
+        res.write("\n");
+      }
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    // Upstream hit output limit. Auto-continue by re-dispatching with an
+    // explicit "continue" turn, while avoiding the truncating model.
+    if (hop >= MAX_CONTINUATION_HOPS || input.override) {
+      // Can't/shouldn't auto-continue when user forced a specific model.
+      if (out.finalLine) {
+        res.write(`${out.finalLine}\n`);
+        res.write("\n");
+      }
+      res.write("data: [DONE]\n\n");
+      res.end();
+      return;
+    }
+
+    excluded.add(currentModelKey);
+    hop += 1;
+
+    const nextRequest: ChatCompletionRequest = {
+      ...input.baseRequest,
+      stream: true,
+      messages: [
+        ...baseMessages,
+        { role: "assistant", content: accumulated },
+        { role: "user", content: "continue" },
+      ],
+    };
+
+    const next = await dispatch({
+      decision: input.decision,
+      request: nextRequest,
+      registry: ctx.registry,
+      auth: ctx.auth,
+      allowEscalation: input.allowEscalation,
+      health: ctx.health,
+      exclude: Array.from(excluded),
+    });
+    currentBody = next.body;
+    currentModelKey = healthKey(next.modelUsed.provider, next.modelUsed.modelID);
+    currentModelIDForUsage = next.modelUsed.modelID;
+    currentEstimatedIn = 0;
+  }
+  res.end();
+}
+
+async function pipeSSEOnce(input: {
+  res: ServerResponse;
+  body: ReadableStream<Uint8Array>;
+  badge: string | null;
+  badgeSent: boolean;
+  sessionID: string;
+  modelID: string;
+  estimatedIn: number;
+  onDelta: (d: string) => void;
+}): Promise<{ finishReason: string | null; finalLine: string | null; badgeSent: boolean }> {
+  const { res, body, sessionID, modelID } = input;
+  let badgeSent = input.badgeSent;
+  let outTokens = 0;
+  let usageReported = false;
+  let finishReason: string | null = null;
+  let finalLine: string | null = null;
+
+  for await (const line of sseLines(body)) {
+    if (!badgeSent && input.badge && line.startsWith("data:")) {
+      const inject = makeBadgeChunk(input.badge);
+      if (inject) res.write(`data: ${inject}\n\n`);
+      badgeSent = true;
+    }
+    if (line.trim() === "data: [DONE]") {
+      continue;
+    }
+    const fr = extractFinishReason(line);
+    if (fr) {
+      finishReason = fr;
+      finalLine = line;
+      continue;
+    }
+    res.write(`${line}\n`);
+    const delta = extractDeltaText(line);
+    if (delta) {
+      input.onDelta(delta);
+      outTokens += estimateStringTokens(delta);
+    }
+    const usage = extractUsage(line);
+    if (usage) {
+      recordUsage(sessionID, usage.in, usage.out, modelID);
+      usageReported = true;
+    }
+  }
+  if (!usageReported) recordUsage(sessionID, input.estimatedIn, outTokens, modelID);
+  return { finishReason, finalLine, badgeSent };
 }
 
 function makeBadgeChunk(badge: string): string | null {

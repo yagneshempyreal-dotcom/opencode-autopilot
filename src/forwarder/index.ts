@@ -18,6 +18,10 @@ export interface DispatchInput {
   signal?: AbortSignal;
   allowEscalation: boolean;
   health?: HealthStore;
+  // Per-request exclusions (provider/modelID). Used by streaming
+  // auto-continuation to avoid immediately re-picking a model that just
+  // truncated or otherwise ended early.
+  exclude?: string[];
   // Per-candidate timeout. When the picked model hangs longer than this
   // we abort and move to the next candidate. Default 60s.
   perAttemptTimeoutMs?: number;
@@ -162,24 +166,28 @@ function candidatePool(input: DispatchInput, tier: Tier, tried: Set<string>, hea
   const tierMembers = modelsForTier(input.registry, tier);
   const ordered: ModelEntry[] = [];
   const isOk = (m: ModelEntry): boolean => isHealthy(health, healthKey(m.provider, m.modelID));
+  const exclude = new Set(input.exclude ?? []);
+  const isExcluded = (m: ModelEntry): boolean => exclude.has(`${m.provider}/${m.modelID}`);
   if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`) && isOk(primary)) {
-    ordered.push(primary);
+    if (!isExcluded(primary)) ordered.push(primary);
   }
   for (const m of tierMembers) {
     const id = `${m.provider}/${m.modelID}`;
     if (tried.has(id)) continue;
     if (primary && id === `${primary.provider}/${primary.modelID}`) continue;
+    if (exclude.has(id)) continue;
     if (!isOk(m)) continue;
     ordered.push(m);
   }
   // If health filter wiped the pool entirely, fall back to "give them a try"
   // — better to attempt a known-down model than to 503 with nothing tried.
   if (ordered.length === 0) {
-    if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`)) ordered.push(primary);
+    if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`) && !isExcluded(primary)) ordered.push(primary);
     for (const m of tierMembers) {
       const id = `${m.provider}/${m.modelID}`;
       if (tried.has(id)) continue;
       if (primary && id === `${primary.provider}/${primary.modelID}`) continue;
+      if (exclude.has(id)) continue;
       ordered.push(m);
     }
   }

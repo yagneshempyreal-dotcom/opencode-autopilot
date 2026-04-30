@@ -11,6 +11,7 @@ interface MockServerOpts {
   failures?: number;
   status?: number;
   modelLabel?: string;
+  finishReason?: string | null;
 }
 
 interface MockServer {
@@ -21,7 +22,7 @@ interface MockServer {
 }
 
 async function startMockProvider(initial: MockServerOpts): Promise<MockServer> {
-  let opts: MockServerOpts = { failures: 0, status: 200, modelLabel: "mock", ...initial };
+  let opts: MockServerOpts = { failures: 0, status: 200, modelLabel: "mock", finishReason: "stop", ...initial };
   let hits = 0;
   const server: Server = createServer((req, res) => {
     hits++;
@@ -51,6 +52,14 @@ async function startMockProvider(initial: MockServerOpts): Promise<MockServer> {
             choices: [{ index: 0, delta: { role: "assistant", content: `hello from ${label}` }, finish_reason: null }],
           });
           res.write(`data: ${chunk}\n\n`);
+          const doneChunk = JSON.stringify({
+            id: "chatcmpl-mock",
+            object: "chat.completion.chunk",
+            created: Math.floor(Date.now() / 1000),
+            model: parsed.model ?? "mock",
+            choices: [{ index: 0, delta: {}, finish_reason: opts.finishReason ?? "stop" }],
+          });
+          res.write(`data: ${doneChunk}\n\n`);
           const usageChunk = JSON.stringify({
             usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
           });
@@ -64,7 +73,7 @@ async function startMockProvider(initial: MockServerOpts): Promise<MockServer> {
             JSON.stringify({
               id: "chatcmpl-mock",
               object: "chat.completion",
-              choices: [{ index: 0, message: { role: "assistant", content: `hello from ${label}` }, finish_reason: "stop" }],
+              choices: [{ index: 0, message: { role: "assistant", content: `hello from ${label}` }, finish_reason: opts.finishReason ?? "stop" }],
               usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
             }),
           );
@@ -232,9 +241,9 @@ describe("proxy integration", () => {
 
   beforeEach(() => {
     clearAllSessions();
-    free.setOpts({ failures: 0, status: 200 });
-    cheap.setOpts({ failures: 0, status: 200 });
-    top.setOpts({ failures: 0, status: 200 });
+    free.setOpts({ failures: 0, status: 200, finishReason: "stop" });
+    cheap.setOpts({ failures: 0, status: 200, finishReason: "stop" });
+    top.setOpts({ failures: 0, status: 200, finishReason: "stop" });
     ctx.setAutoEnabled(true);
   });
 
@@ -274,6 +283,23 @@ describe("proxy integration", () => {
     });
     expect(r.status).toBe(200);
     expect(cheap.hits).toBe(beforeCheap + 1);
+    expect(r.text).toContain("hello from cheap");
+  });
+
+  it("continues automatically when upstream hits finish_reason=length", async () => {
+    // Simulate a GPT-style truncation (max_tokens hit).
+    free.setOpts({ finishReason: "length" });
+    const beforeCheap = cheap.hits;
+    const r = await postChat(proxy.port, {
+      model: "auto",
+      stream: true,
+      messages: [{ role: "user", content: "write a long answer" }],
+    });
+    expect(r.status).toBe(200);
+    // The proxy should have performed at least one continuation hop, which
+    // forces it to avoid the truncating model and pick another candidate.
+    expect(cheap.hits).toBeGreaterThan(beforeCheap);
+    expect(r.text).toContain("hello from free");
     expect(r.text).toContain("hello from cheap");
   });
 
