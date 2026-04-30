@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { logger } from "../util/log.js";
 import { authJsonPath } from "../util/paths.js";
 import type { OpenCodeAuth, AuthEntry } from "../types.js";
+import { loadOpencodeConfig, OPENCODE_CONFIG_PATH } from "./opencode.js";
 
 export const AUTH_PATH = authJsonPath();
 
@@ -22,6 +23,74 @@ export async function loadAuth(path: string = AUTH_PATH): Promise<OpenCodeAuth> 
 
 export function getCredential(auth: OpenCodeAuth, provider: string): AuthEntry | null {
   return auth[provider] ?? null;
+}
+
+function apiKeyFromOpencodeConfig(cfg: unknown, provider: string): string | null {
+  try {
+    const prov = (cfg as { provider?: Record<string, unknown> } | null | undefined)?.provider;
+    const p = prov?.[provider] as { options?: { apiKey?: unknown } } | undefined;
+    const key = p?.options?.apiKey;
+    return typeof key === "string" && key.trim().length > 0 ? key.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function envVarCandidates(provider: string): string[] {
+  const p = provider.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const out: string[] = [];
+  // Common provider-specific names used by SDKs/CLIs.
+  if (provider === "openai") out.push("OPENAI_API_KEY");
+  if (provider === "openrouter") out.push("OPENROUTER_API_KEY");
+  if (provider === "anthropic") out.push("ANTHROPIC_API_KEY");
+  if (provider === "deepseek") out.push("DEEPSEEK_API_KEY");
+  // Generic fallback.
+  out.push(`${p}_API_KEY`);
+  return Array.from(new Set(out));
+}
+
+function apiKeyFromEnv(provider: string): string | null {
+  for (const k of envVarCandidates(provider)) {
+    const v = process.env[k];
+    if (typeof v === "string" && v.trim().length > 0) return v.trim();
+  }
+  return null;
+}
+
+export async function loadEffectiveAuth(opts?: {
+  authPath?: string;
+  opencodePath?: string;
+  baseAuth?: OpenCodeAuth;
+}): Promise<OpenCodeAuth> {
+  const authPath = opts?.authPath ?? AUTH_PATH;
+  const opencodePath = opts?.opencodePath ?? OPENCODE_CONFIG_PATH;
+  const auth = await loadAuth(authPath);
+  const opencodeCfg = await loadOpencodeConfig(opencodePath).catch(() => ({}) as unknown as Awaited<ReturnType<typeof loadOpencodeConfig>>);
+
+  // Merge strategy (non-destructive):
+  // - Prefer baseAuth + auth.json entries (explicit opencode login)
+  // - If missing, use opencode.json provider.options.apiKey
+  // - If still missing, use env vars (OPENAI_API_KEY, etc.)
+  const merged: OpenCodeAuth = { ...(opts?.baseAuth ?? {}), ...auth };
+  const providers = new Set<string>([
+    "openai",
+    "openrouter",
+    "anthropic",
+    "deepseek",
+    ...Object.keys((opencodeCfg.provider ?? {}) as Record<string, unknown>),
+    ...Object.keys(merged),
+  ]);
+  for (const provider of providers) {
+    if (merged[provider]) continue;
+    const fromCfg = apiKeyFromOpencodeConfig(opencodeCfg, provider);
+    if (fromCfg) {
+      merged[provider] = { type: "api", key: fromCfg };
+      continue;
+    }
+    const fromEnv = apiKeyFromEnv(provider);
+    if (fromEnv) merged[provider] = { type: "api", key: fromEnv };
+  }
+  return merged;
 }
 
 export function bearerToken(entry: AuthEntry | null): string | null {

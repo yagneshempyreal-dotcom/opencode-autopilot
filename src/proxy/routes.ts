@@ -10,7 +10,7 @@ import { formatBadge } from "../badge/format.js";
 import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
 import { saveConfig } from "../config/store.js";
-import { loadAuth } from "../config/auth.js";
+import { loadEffectiveAuth } from "../config/auth.js";
 import { extractTaskTags } from "../classifier/tags.js";
 import { saveHealth, verifyAll, key as healthKey } from "../registry/health.js";
 import type { ProxyContext } from "./context.js";
@@ -191,19 +191,17 @@ export async function handleChatCompletions(
   const stream = parsed.request.stream ?? false;
   parsed.request.stream = stream;
 
-  // Reload auth from disk if any cached entry is OAuth — opencode refreshes
-  // access tokens and writes them back to auth.json, and a stale value here
-  // gives 401 once the token expires (~1 h). API-key-only setups skip the
-  // file read; this also keeps tests deterministic when ctx.auth is a literal.
+  // Always load an "effective" auth view from local user config:
+  // - ~/.config/opencode/auth.json (opencode auth login ...)
+  // - ~/.config/opencode/opencode.json provider.options.apiKey
+  // - env vars (OPENAI_API_KEY, etc.)
+  // This avoids "works directly but router says no credentials" mismatches.
   let liveAuth = ctx.auth;
-  const hasOAuth = Object.values(ctx.auth).some((e) => e?.type === "oauth");
-  if (hasOAuth) {
-    try {
-      liveAuth = await loadAuth();
-      ctx.auth = liveAuth;
-    } catch (err) {
-      logger.warn("auth reload failed; using cached", { err: (err as Error).message });
-    }
+  try {
+    liveAuth = await loadEffectiveAuth({ baseAuth: ctx.auth });
+    ctx.auth = liveAuth;
+  } catch (err) {
+    logger.warn("effective auth load failed; using cached", { err: (err as Error).message });
   }
 
   let dispatchResult;

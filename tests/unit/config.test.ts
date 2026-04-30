@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from "../../src/config/store.js";
-import { loadAuth, getCredential, bearerToken, isOAuthExpired } from "../../src/config/auth.js";
+import { loadAuth, loadEffectiveAuth, getCredential, bearerToken, isOAuthExpired } from "../../src/config/auth.js";
 
 describe("config store", () => {
   let dir: string;
@@ -49,10 +49,12 @@ describe("config store", () => {
 describe("auth", () => {
   let dir: string;
   let path: string;
+  let opencodePath: string;
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "autopilot-auth-"));
     path = join(dir, "auth.json");
+    opencodePath = join(dir, "opencode.json");
   });
 
   afterEach(async () => {
@@ -68,6 +70,26 @@ describe("auth", () => {
     await writeFile(path, JSON.stringify({ openai: { type: "api", key: "sk-x" } }));
     const auth = await loadAuth(path);
     expect(auth.openai).toEqual({ type: "api", key: "sk-x" });
+  });
+
+  it("loadEffectiveAuth falls back to opencode.json provider.options.apiKey", async () => {
+    await writeFile(opencodePath, JSON.stringify({
+      provider: { openai: { options: { apiKey: "sk-from-opencode" } } },
+    }));
+    const auth = await loadEffectiveAuth({ authPath: path, opencodePath });
+    expect(bearerToken(getCredential(auth, "openai"))).toBe("sk-from-opencode");
+  });
+
+  it("loadEffectiveAuth falls back to env var when auth.json missing", async () => {
+    const old = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-from-env";
+    try {
+      const auth = await loadEffectiveAuth({ authPath: path, opencodePath });
+      expect(bearerToken(getCredential(auth, "openai"))).toBe("sk-from-env");
+    } finally {
+      if (old === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = old;
+    }
   });
 
   it("getCredential + bearerToken extract correctly", () => {
