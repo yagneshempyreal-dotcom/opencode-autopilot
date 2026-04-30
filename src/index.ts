@@ -2,7 +2,7 @@ import type { Plugin, Hooks, PluginInput } from "@opencode-ai/plugin";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { loadConfig, saveConfig } from "./config/store.js";
-import { loadAuth } from "./config/auth.js";
+import { loadAuth, loadEffectiveAuth } from "./config/auth.js";
 import { loadOpencodeConfig, ensureRouterProvider } from "./config/opencode.js";
 import { buildRegistry } from "./registry/index.js";
 import { startProxy, type ProxyServer } from "./proxy/server.js";
@@ -47,9 +47,13 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
         pid: process.pid,
       }) + "\n");
     } catch { /* */ }
+    // Use effective auth (auth.json + opencode.json provider.options.apiKey
+    // + env vars) so the registry sees every provider the user has any
+    // credential for — not just opencode-login entries. This is what makes
+    // env-var-only setups (OPENAI_API_KEY etc) light up at startup.
     const [config, auth, opencodeCfg, recentModels, health] = await Promise.all([
       loadConfig(),
-      loadAuth(),
+      loadEffectiveAuth().catch(() => loadAuth()),
       loadOpencodeConfig(),
       loadRecentModels(),
       loadHealth(),
@@ -112,15 +116,17 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
       }
     }
 
-    // Background warm-up: if we have no fresh health data, probe every
-    // model now so the user's first prompt routes straight to a working
-    // model instead of cascading through dead ones. Doesn't block
-    // plugin init — runs detached.
-    queueMicrotask(() => {
-      void warmHealthIfStale(ctx).catch((err) => {
-        logger.warn("background verify failed", { err: (err as Error).message });
+    // Background warm-up: probe every model on every startup so the
+    // user's first prompt routes straight to a working model instead of
+    // cascading through dead/expired ones. Doesn't block plugin init —
+    // runs detached. Set OPENCODE_OPENAUTO_SKIP_VERIFY=1 to disable.
+    if (process.env.OPENCODE_OPENAUTO_SKIP_VERIFY !== "1") {
+      queueMicrotask(() => {
+        void warmHealth(ctx).catch((err) => {
+          logger.warn("background verify failed", { err: (err as Error).message });
+        });
       });
-    });
+    }
 
     events.on((e) => {
       if (e.type === "handover") logger.info("handover signal", e);
@@ -190,17 +196,11 @@ const plugin: Plugin = async (_input: PluginInput): Promise<Hooks> => {
   }
 };
 
-// Probe every registry model in the background if health data is empty or
-// older than 6h. After the probe, auto-pin the OK set so the first real
-// request goes directly to a working model without cascading.
-async function warmHealthIfStale(ctx: ProxyContext): Promise<void> {
+// Probe every registry model in the background and auto-pin the OK set
+// so the first real request goes directly to a working model without
+// cascading through dead ones. Runs on every plugin start.
+async function warmHealth(ctx: ProxyContext): Promise<void> {
   if (ctx.registry.models.length === 0) return;
-  const STALE_MS = 6 * 60 * 60 * 1000;
-  const records = Object.values(ctx.health.records);
-  const newest = records.reduce((acc, r) => Math.max(acc, r.lastChecked), 0);
-  const stale = records.length === 0 || Date.now() - newest > STALE_MS;
-  if (!stale) return;
-
   logger.info("background verify starting", { models: ctx.registry.models.length });
   const report = await verifyAll(ctx.registry.models, ctx.auth, ctx.health, {
     concurrency: 4,
