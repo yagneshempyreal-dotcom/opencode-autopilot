@@ -10,6 +10,7 @@ export interface DispatchInput {
     signal?: AbortSignal;
     allowEscalation: boolean;
     health?: HealthStore;
+    exclude?: string[];
     perAttemptTimeoutMs?: number;
 }
 export interface DispatchResult extends ForwardResult {

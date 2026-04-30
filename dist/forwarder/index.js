@@ -137,14 +137,19 @@ function candidatePool(input, tier, tried, health) {
     const tierMembers = modelsForTier(input.registry, tier);
     const ordered = [];
     const isOk = (m) => isHealthy(health, healthKey(m.provider, m.modelID));
+    const exclude = new Set(input.exclude ?? []);
+    const isExcluded = (m) => exclude.has(`${m.provider}/${m.modelID}`);
     if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`) && isOk(primary)) {
-        ordered.push(primary);
+        if (!isExcluded(primary))
+            ordered.push(primary);
     }
     for (const m of tierMembers) {
         const id = `${m.provider}/${m.modelID}`;
         if (tried.has(id))
             continue;
         if (primary && id === `${primary.provider}/${primary.modelID}`)
+            continue;
+        if (exclude.has(id))
             continue;
         if (!isOk(m))
             continue;
@@ -153,13 +158,15 @@ function candidatePool(input, tier, tried, health) {
     // If health filter wiped the pool entirely, fall back to "give them a try"
     // — better to attempt a known-down model than to 503 with nothing tried.
     if (ordered.length === 0) {
-        if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`))
+        if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`) && !isExcluded(primary))
             ordered.push(primary);
         for (const m of tierMembers) {
             const id = `${m.provider}/${m.modelID}`;
             if (tried.has(id))
                 continue;
             if (primary && id === `${primary.provider}/${primary.modelID}`)
+                continue;
+            if (exclude.has(id))
                 continue;
             ordered.push(m);
         }

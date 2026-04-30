@@ -56,4 +56,18 @@ export function extractUsage(line) {
         return null;
     }
 }
+export function extractFinishReason(line) {
+    if (!line.startsWith("data:"))
+        return null;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === "[DONE]")
+        return null;
+    try {
+        const parsed = JSON.parse(payload);
+        return parsed.choices?.[0]?.finish_reason ?? null;
+    }
+    catch {
+        return null;
+    }
+}
 //# sourceMappingURL=sse.js.map

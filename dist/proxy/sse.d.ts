@@ -17,4 +17,5 @@ export declare function extractUsage(line: string): {
     in: number;
     out: number;
 } | null;
+export declare function extractFinishReason(line: string): string | null;
 //# sourceMappingURL=sse.d.ts.map

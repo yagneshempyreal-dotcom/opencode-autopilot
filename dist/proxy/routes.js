@@ -4,14 +4,14 @@ import { decide, bumpStickyFloor, GOAL_MATRIX } from "../policy/index.js";
 import { dispatch } from "../forwarder/index.js";
 import { findModel, modelsForTier } from "../registry/index.js";
 import { parseRequest } from "./parse.js";
-import { sseLines, extractDeltaText, extractUsage } from "./sse.js";
+import { sseLines, extractDeltaText, extractUsage, extractFinishReason } from "./sse.js";
 import { formatBadge } from "../badge/format.js";
 import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
 import { saveConfig } from "../config/store.js";
-import { loadAuth } from "../config/auth.js";
+import { loadEffectiveAuth } from "../config/auth.js";
 import { extractTaskTags } from "../classifier/tags.js";
-import { saveHealth, verifyAll } from "../registry/health.js";
+import { saveHealth, verifyAll, key as healthKey } from "../registry/health.js";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 export async function handleChatCompletions(req, res, ctx) {
     const raw = await readJSON(req).catch((err) => {
@@ -171,20 +171,18 @@ export async function handleChatCompletions(req, res, ctx) {
         : null;
     const stream = parsed.request.stream ?? false;
     parsed.request.stream = stream;
-    // Reload auth from disk if any cached entry is OAuth — opencode refreshes
-    // access tokens and writes them back to auth.json, and a stale value here
-    // gives 401 once the token expires (~1 h). API-key-only setups skip the
-    // file read; this also keeps tests deterministic when ctx.auth is a literal.
+    // Always load an "effective" auth view from local user config:
+    // - ~/.config/opencode/auth.json (opencode auth login ...)
+    // - ~/.config/opencode/opencode.json provider.options.apiKey
+    // - env vars (OPENAI_API_KEY, etc.)
+    // This avoids "works directly but router says no credentials" mismatches.
     let liveAuth = ctx.auth;
-    const hasOAuth = Object.values(ctx.auth).some((e) => e?.type === "oauth");
-    if (hasOAuth) {
-        try {
-            liveAuth = await loadAuth();
-            ctx.auth = liveAuth;
-        }
-        catch (err) {
-            logger.warn("auth reload failed; using cached", { err: err.message });
-        }
+    try {
+        liveAuth = await loadEffectiveAuth({ baseAuth: ctx.auth });
+        ctx.auth = liveAuth;
+    }
+    catch (err) {
+        logger.warn("effective auth load failed; using cached", { err: err.message });
     }
     let dispatchResult;
     try {
@@ -235,7 +233,20 @@ export async function handleChatCompletions(req, res, ctx) {
         return;
     }
     if (isStream) {
-        await streamThrough(res, dispatchResult.body, badge, parsed.sessionID, decision.modelID, estimatedTokens);
+        await streamWithContinuation({
+            res,
+            ctx,
+            initialBody: dispatchResult.body,
+            initialModelID: decision.modelID,
+            initialProvider: decision.provider,
+            badge,
+            sessionID: parsed.sessionID,
+            estimatedIn: estimatedTokens,
+            baseRequest: parsed.request,
+            decision,
+            allowEscalation: !parsed.override,
+            override: parsed.override,
+        });
         return;
     }
     await passThroughJSON(res, dispatchResult.body, badge, parsed.sessionID, decision.modelID, estimatedTokens);
@@ -315,6 +326,118 @@ async function streamThrough(res, body, badge, sessionID, modelID, estimatedIn) 
     if (!usageReported)
         recordUsage(sessionID, estimatedIn, outTokens, modelID);
     res.end();
+}
+const MAX_CONTINUATION_HOPS = 2;
+async function streamWithContinuation(input) {
+    const { res, ctx, sessionID, estimatedIn } = input;
+    const baseMessages = input.baseRequest.messages;
+    let hop = 0;
+    let badgeSent = false;
+    let accumulated = "";
+    const excluded = new Set();
+    let currentBody = input.initialBody;
+    let currentModelKey = `${input.initialProvider}/${input.initialModelID}`;
+    let currentModelIDForUsage = input.initialModelID;
+    let currentEstimatedIn = estimatedIn;
+    while (currentBody) {
+        const out = await pipeSSEOnce({
+            res,
+            body: currentBody,
+            badge: input.badge,
+            badgeSent,
+            sessionID,
+            modelID: currentModelIDForUsage,
+            estimatedIn: currentEstimatedIn,
+            onDelta: (d) => { accumulated += d; },
+        });
+        badgeSent = out.badgeSent;
+        if (out.finishReason !== "length") {
+            // Normal termination (or unknown) — forward the final chunk + DONE.
+            if (out.finalLine) {
+                res.write(`${out.finalLine}\n`);
+                res.write("\n");
+            }
+            res.write("data: [DONE]\n\n");
+            res.end();
+            return;
+        }
+        // Upstream hit output limit. Auto-continue by re-dispatching with an
+        // explicit "continue" turn, while avoiding the truncating model.
+        if (hop >= MAX_CONTINUATION_HOPS || input.override) {
+            // Can't/shouldn't auto-continue when user forced a specific model.
+            if (out.finalLine) {
+                res.write(`${out.finalLine}\n`);
+                res.write("\n");
+            }
+            res.write("data: [DONE]\n\n");
+            res.end();
+            return;
+        }
+        excluded.add(currentModelKey);
+        hop += 1;
+        const nextRequest = {
+            ...input.baseRequest,
+            stream: true,
+            messages: [
+                ...baseMessages,
+                { role: "assistant", content: accumulated },
+                { role: "user", content: "continue" },
+            ],
+        };
+        const next = await dispatch({
+            decision: input.decision,
+            request: nextRequest,
+            registry: ctx.registry,
+            auth: ctx.auth,
+            allowEscalation: input.allowEscalation,
+            health: ctx.health,
+            exclude: Array.from(excluded),
+        });
+        currentBody = next.body;
+        currentModelKey = healthKey(next.modelUsed.provider, next.modelUsed.modelID);
+        currentModelIDForUsage = next.modelUsed.modelID;
+        currentEstimatedIn = 0;
+    }
+    res.end();
+}
+async function pipeSSEOnce(input) {
+    const { res, body, sessionID, modelID } = input;
+    let badgeSent = input.badgeSent;
+    let outTokens = 0;
+    let usageReported = false;
+    let finishReason = null;
+    let finalLine = null;
+    for await (const line of sseLines(body)) {
+        if (!badgeSent && input.badge && line.startsWith("data:")) {
+            const inject = makeBadgeChunk(input.badge);
+            if (inject)
+                res.write(`data: ${inject}\n\n`);
+            badgeSent = true;
+        }
+        if (line.trim() === "data: [DONE]") {
+            continue;
+        }
+        const fr = extractFinishReason(line);
+        if (fr) {
+            finishReason = fr;
+            finalLine = line;
+            continue;
+        }
+        res.write(`${line}\n`);
+        const delta = extractDeltaText(line);
+        if (delta) {
+            input.onDelta(delta);
+            outTokens += estimateStringTokens(delta);
+        }
+        const usage = extractUsage(line);
+        if (usage) {
+            recordUsage(sessionID, usage.in, usage.out, modelID);
+            usageReported = true;
+        }
+    }
+    if (!usageReported)
+        recordUsage(sessionID, input.estimatedIn, outTokens, modelID);
+    return { finishReason, finalLine, badgeSent };
 }
 function makeBadgeChunk(badge) {
     try {
