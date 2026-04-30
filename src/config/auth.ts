@@ -36,17 +36,38 @@ function apiKeyFromOpencodeConfig(cfg: unknown, provider: string): string | null
   }
 }
 
+// Conventional env-var names per provider. Keep aligned with registry's
+// PROVIDER_BASE_URLS list so any provider opencode supports also resolves
+// from env. Order matters — first hit wins.
+const PROVIDER_ENV_VARS: Record<string, string[]> = {
+  openai: ["OPENAI_API_KEY"],
+  openrouter: ["OPENROUTER_API_KEY"],
+  anthropic: ["ANTHROPIC_API_KEY", "CLAUDE_API_KEY"],
+  deepseek: ["DEEPSEEK_API_KEY"],
+  groq: ["GROQ_API_KEY"],
+  cerebras: ["CEREBRAS_API_KEY"],
+  together: ["TOGETHER_API_KEY", "TOGETHER_AI_API_KEY"],
+  zhipuai: ["ZHIPUAI_API_KEY", "ZAI_API_KEY", "BIGMODEL_API_KEY"],
+  opencode: ["OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"],
+  mistral: ["MISTRAL_API_KEY"],
+  xai: ["XAI_API_KEY", "GROK_API_KEY"],
+  google: ["GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY"],
+  "google-vertex": ["GOOGLE_VERTEX_API_KEY", "GOOGLE_API_KEY"],
+  perplexity: ["PERPLEXITY_API_KEY"],
+  fireworks: ["FIREWORKS_API_KEY"],
+  cohere: ["COHERE_API_KEY"],
+  azure: ["AZURE_API_KEY", "AZURE_OPENAI_API_KEY"],
+  moonshot: ["MOONSHOT_API_KEY"],
+};
+
+// Universe of providers we know how to seed even when absent from auth.json
+// and opencode.json — so an env-var-only setup still works.
+const KNOWN_PROVIDERS: string[] = Object.keys(PROVIDER_ENV_VARS);
+
 function envVarCandidates(provider: string): string[] {
-  const p = provider.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const out: string[] = [];
-  // Common provider-specific names used by SDKs/CLIs.
-  if (provider === "openai") out.push("OPENAI_API_KEY");
-  if (provider === "openrouter") out.push("OPENROUTER_API_KEY");
-  if (provider === "anthropic") out.push("ANTHROPIC_API_KEY");
-  if (provider === "deepseek") out.push("DEEPSEEK_API_KEY");
-  // Generic fallback.
-  out.push(`${p}_API_KEY`);
-  return Array.from(new Set(out));
+  const generic = `${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+  const known = PROVIDER_ENV_VARS[provider] ?? [];
+  return Array.from(new Set([...known, generic]));
 }
 
 function apiKeyFromEnv(provider: string): string | null {
@@ -73,10 +94,7 @@ export async function loadEffectiveAuth(opts?: {
   // - If still missing, use env vars (OPENAI_API_KEY, etc.)
   const merged: OpenCodeAuth = { ...(opts?.baseAuth ?? {}), ...auth };
   const providers = new Set<string>([
-    "openai",
-    "openrouter",
-    "anthropic",
-    "deepseek",
+    ...KNOWN_PROVIDERS,
     ...Object.keys((opencodeCfg.provider ?? {}) as Record<string, unknown>),
     ...Object.keys(merged),
   ]);

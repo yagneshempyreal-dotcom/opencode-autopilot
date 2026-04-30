@@ -92,6 +92,42 @@ describe("auth", () => {
     }
   });
 
+  it("loadEffectiveAuth resolves env vars for non-openai providers (groq, anthropic, openrouter)", async () => {
+    const saved = {
+      GROQ_API_KEY: process.env.GROQ_API_KEY,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    };
+    process.env.GROQ_API_KEY = "gsk-1";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-2";
+    process.env.OPENROUTER_API_KEY = "sk-or-3";
+    try {
+      const auth = await loadEffectiveAuth({ authPath: path, opencodePath });
+      expect(bearerToken(getCredential(auth, "groq"))).toBe("gsk-1");
+      expect(bearerToken(getCredential(auth, "anthropic"))).toBe("sk-ant-2");
+      expect(bearerToken(getCredential(auth, "openrouter"))).toBe("sk-or-3");
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it("loadEffectiveAuth pulls apiKey for any provider declared in opencode.json", async () => {
+    await writeFile(opencodePath, JSON.stringify({
+      provider: {
+        groq: { options: { apiKey: "gsk-cfg" } },
+        cerebras: { options: { apiKey: "csk-cfg" } },
+        "custom-provider": { options: { apiKey: "ck-cfg" } },
+      },
+    }));
+    const auth = await loadEffectiveAuth({ authPath: path, opencodePath });
+    expect(bearerToken(getCredential(auth, "groq"))).toBe("gsk-cfg");
+    expect(bearerToken(getCredential(auth, "cerebras"))).toBe("csk-cfg");
+    expect(bearerToken(getCredential(auth, "custom-provider"))).toBe("ck-cfg");
+  });
+
   it("getCredential + bearerToken extract correctly", () => {
     const farFuture = Date.now() + 60 * 60 * 1000;
     const auth = {
