@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/** @deprecated Use `openauto` via dist/cli/main.js — re-exports for compatibility. */
 import { runCli } from "./router.js";
 
 runCli(process.argv).catch((err) => {

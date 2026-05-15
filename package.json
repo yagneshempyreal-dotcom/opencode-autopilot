@@ -1,10 +1,14 @@
 {
   "name": "opencode-openauto",
   "version": "0.1.0",
-  "description": "OpenAuto — automatic model routing plugin for opencode. Picks best LLM per prompt, optimized for cost / quality / balance. Auto-handover on context-window pressure.",
+  "description": "OpenAuto — standalone CLI + opencode plugin for automatic LLM routing. Premium-first with consent-based free fallback.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "openauto": "./dist/cli/main.js",
+    "opencode-openauto": "./dist/cli/main.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

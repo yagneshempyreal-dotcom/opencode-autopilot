@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-/** @deprecated Use `openauto` via dist/cli/main.js — re-exports for compatibility. */
 import { runCli } from "./router.js";
 runCli(process.argv).catch((err) => {
     console.error("Error:", err.message);
     process.exit(1);
 });
-//# sourceMappingURL=index.js.map
+//# sourceMappingURL=main.js.map
