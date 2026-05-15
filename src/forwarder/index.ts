@@ -1,12 +1,19 @@
-import type { ChatCompletionRequest, ModelEntry, OpenCodeAuth, RouteDecision, Tier } from "../types.js";
+import type { AutopilotConfig, ChatCompletionRequest, ModelEntry, OpenCodeAuth, RouteDecision, Tier } from "../types.js";
 import type { Registry } from "../registry/index.js";
 import { findModel, modelsForTier } from "../registry/index.js";
 import { forwardOpenAICompat } from "./openai.js";
 import { forwardAnthropic } from "./anthropic.js";
 import type { ForwardInput, ForwardResult } from "./types.js";
-import { ForwardError, isRetriableStatus } from "./types.js";
+import { ForwardError, isRetriableStatus, PremiumExhaustedError } from "./types.js";
 import { logger } from "../util/log.js";
 import { tierLadder } from "../policy/index.js";
+import {
+  isPremiumGoal,
+  buildPremiumCandidates,
+  buildFreeCandidates,
+  premiumRetries,
+  premiumFallbackToFree,
+} from "../policy/premium.js";
 import type { HealthStore } from "../registry/health.js";
 import { isHealthy, key as healthKey, markOk, markDown, emptyStore } from "../registry/health.js";
 
@@ -15,6 +22,7 @@ export interface DispatchInput {
   request: ChatCompletionRequest;
   registry: Registry;
   auth: OpenCodeAuth;
+  config?: AutopilotConfig;
   signal?: AbortSignal;
   allowEscalation: boolean;
   health?: HealthStore;
@@ -22,6 +30,8 @@ export interface DispatchInput {
   // auto-continuation to avoid immediately re-picking a model that just
   // truncated or otherwise ended early.
   exclude?: string[];
+  /** Session opted into free models after premium exhaustion (`router free`). */
+  freeModeActive?: boolean;
   // Per-candidate timeout. When the picked model hangs longer than this
   // we abort and move to the next candidate. Default 60s.
   perAttemptTimeoutMs?: number;
@@ -40,6 +50,13 @@ const FORWARDERS: Record<ModelEntry["apiShape"], (input: ForwardInput) => Promis
 };
 
 export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
+  if (input.config && isPremiumGoal(input.config) && !input.decision.override) {
+    return dispatchPremium(input);
+  }
+  return dispatchStandard(input);
+}
+
+async function dispatchStandard(input: DispatchInput): Promise<DispatchResult> {
   const attempts: DispatchResult["attempts"] = [];
   const tried = new Set<string>();
   const startTier = input.decision.tier;
@@ -99,6 +116,151 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   }
 
   throw new ForwardError(503, `all candidates failed: ${JSON.stringify(attempts)}`, false);
+}
+
+async function dispatchPremium(input: DispatchInput): Promise<DispatchResult> {
+  const attempts: DispatchResult["attempts"] = [];
+  const health = input.health ?? emptyStore();
+  const cfg = input.config!;
+  const retries = premiumRetries(cfg);
+  const estimatedTokens = estimateMessagesTokens(input.request.messages);
+  const exclude = input.exclude ?? [];
+
+  if (input.freeModeActive) {
+    return dispatchFreeOnly(input, attempts, health, estimatedTokens, exclude);
+  }
+
+  const premiumPool = buildPremiumCandidates(
+    input.registry,
+    cfg,
+    estimatedTokens,
+    health,
+    [],
+    exclude,
+  );
+
+  const premiumResult = await tryCandidates({
+    input,
+    candidates: premiumPool,
+    attempts,
+    health,
+    retriesPerModel: retries,
+  });
+  if (premiumResult) return { ...premiumResult, escalated: false };
+
+  if (premiumFallbackToFree(cfg)) {
+    return dispatchFreeOnly(input, attempts, health, estimatedTokens, exclude);
+  }
+
+  throw new PremiumExhaustedError(attempts);
+}
+
+async function dispatchFreeOnly(
+  input: DispatchInput,
+  attempts: DispatchResult["attempts"],
+  health: HealthStore,
+  estimatedTokens: number,
+  exclude: string[],
+): Promise<DispatchResult> {
+  const cfg = input.config!;
+  const freePool = buildFreeCandidates(input.registry, cfg, estimatedTokens, health, exclude);
+  if (freePool.length === 0) {
+    throw new ForwardError(503, "no free models configured for fallback", false);
+  }
+  const freeResult = await tryCandidates({
+    input,
+    candidates: freePool,
+    attempts,
+    health,
+    retriesPerModel: 1,
+  });
+  if (freeResult) return { ...freeResult, escalated: true };
+  throw new ForwardError(503, `free pool failed: ${JSON.stringify(attempts)}`, false);
+}
+
+export { PremiumExhaustedError };
+
+async function tryCandidates(opts: {
+  input: DispatchInput;
+  candidates: ModelEntry[];
+  attempts: DispatchResult["attempts"];
+  health: HealthStore;
+  retriesPerModel: number;
+}): Promise<DispatchResult | null> {
+  const { input, candidates, attempts, health, retriesPerModel } = opts;
+  for (const candidate of candidates) {
+    for (let attempt = 0; attempt < retriesPerModel; attempt++) {
+      const result = await forwardOnce(input, candidate, attempts, health);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+async function forwardOnce(
+  input: DispatchInput,
+  candidate: ModelEntry,
+  attempts: DispatchResult["attempts"],
+  health: HealthStore,
+): Promise<DispatchResult | null> {
+  const t0 = Date.now();
+  const timeoutMs = input.perAttemptTimeoutMs ?? 60_000;
+  const ctrl = new AbortController();
+  const upstream = input.signal;
+  const onUpstreamAbort = () => ctrl.abort();
+  if (upstream) upstream.addEventListener("abort", onUpstreamAbort, { once: true });
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const fwd = FORWARDERS[candidate.apiShape];
+    const result = await fwd({
+      request: injectIdentityPrompt(input.request, candidate),
+      model: candidate,
+      auth: input.auth,
+      signal: ctrl.signal,
+    });
+    markOk(health, healthKey(candidate.provider, candidate.modelID), Date.now() - t0);
+    return {
+      ...result,
+      attempts: [...attempts, { provider: candidate.provider, modelID: candidate.modelID, status: result.status }],
+      escalated: false,
+    };
+  } catch (err) {
+    const reason = err instanceof ForwardError ? err.detail ?? `status ${err.status}` : (err as Error).message;
+    markDown(health, healthKey(candidate.provider, candidate.modelID), reason ?? "error");
+    if (err instanceof ForwardError) {
+      attempts.push({ provider: candidate.provider, modelID: candidate.modelID, status: err.status, reason: err.detail });
+      logger.warn("forward attempt failed", {
+        provider: candidate.provider,
+        model: candidate.modelID,
+        status: err.status,
+        mode: "premium",
+      });
+    } else {
+      attempts.push({ provider: candidate.provider, modelID: candidate.modelID, status: 0, reason: (err as Error).message });
+      logger.warn("forward exception", { provider: candidate.provider, model: candidate.modelID, err: (err as Error).message });
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+    if (upstream) upstream.removeEventListener("abort", onUpstreamAbort);
+  }
+}
+
+function estimateMessagesTokens(messages: ChatCompletionRequest["messages"]): number {
+  let total = 2;
+  for (const m of messages ?? []) {
+    total += 4;
+    const c = m.content;
+    if (typeof c === "string") total += Math.ceil(c.length / 3.8);
+    else if (Array.isArray(c)) {
+      for (const p of c) {
+        if (typeof (p as { text?: string }).text === "string") {
+          total += Math.ceil((p as { text: string }).text.length / 3.8);
+        }
+      }
+    }
+  }
+  return total;
 }
 
 // Models hallucinate their own identity — they'll claim to be Claude or
@@ -168,8 +330,9 @@ function candidatePool(input: DispatchInput, tier: Tier, tried: Set<string>, hea
   const isOk = (m: ModelEntry): boolean => isHealthy(health, healthKey(m.provider, m.modelID));
   const exclude = new Set(input.exclude ?? []);
   const isExcluded = (m: ModelEntry): boolean => exclude.has(`${m.provider}/${m.modelID}`);
-  if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`) && isOk(primary)) {
-    if (!isExcluded(primary)) ordered.push(primary);
+  const forcePrimary = input.decision.override && primary && primary.tier === tier;
+  if (primary && primary.tier === tier && !tried.has(`${primary.provider}/${primary.modelID}`)) {
+    if (!isExcluded(primary) && (forcePrimary || isOk(primary))) ordered.push(primary);
   }
   for (const m of tierMembers) {
     const id = `${m.provider}/${m.modelID}`;

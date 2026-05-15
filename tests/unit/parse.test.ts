@@ -42,6 +42,24 @@ describe("parseRequest", () => {
     expect(result.signals.upgradeRequested).toBe(true);
   });
 
+  it("detects router free accept", () => {
+    const result = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "router free" }],
+    }, "s-free");
+    expect(result.signals.freeAccept).toBe(true);
+    expect(result.signals.freeOff).toBe(false);
+  });
+
+  it("detects router free off", () => {
+    const result = parseRequest({
+      model: "auto",
+      messages: [{ role: "user", content: "router free off" }],
+    }, "s-free-off");
+    expect(result.signals.freeOff).toBe(true);
+    expect(result.signals.freeAccept).toBe(false);
+  });
+
   it("detects /auto off", () => {
     const result = parseRequest({
       model: "auto",

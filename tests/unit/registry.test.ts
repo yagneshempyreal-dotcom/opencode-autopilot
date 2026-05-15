@@ -111,6 +111,19 @@ describe("buildRegistry", () => {
     expect(m?.modelID).toBe("gpt-5.4-mini");
   });
 
+  it("resolves bare gpt prefix to openai when unique", () => {
+    const reg = buildRegistry({
+      auth: { openai: { type: "api", key: "k" } },
+      opencodeConfig: {
+        provider: {
+          openai: { models: { "gpt-5.4": {}, "gpt-5.4-mini": {} } },
+        },
+      },
+    });
+    expect(findModel(reg, "gpt-5.4")?.modelID).toBe("gpt-5.4");
+    expect(findModel(reg, "gpt-5.4")?.provider).toBe("openai");
+  });
+
   it("handles empty auth gracefully", () => {
     const reg = buildRegistry({ auth: {}, opencodeConfig: {} });
     expect(reg.models).toHaveLength(0);

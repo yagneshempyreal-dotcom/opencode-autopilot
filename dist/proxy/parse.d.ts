@@ -13,13 +13,17 @@ export interface ParsedSignals {
     autoOff: boolean;
     autoOn: boolean;
     resumeRequested: boolean;
-    goalSwitch: "cost" | "balance" | "quality" | null;
+    goalSwitch: "cost" | "balance" | "quality" | "premium" | null;
     statusRequested: boolean;
     modelsRequested: boolean;
     verifyRequested: boolean;
     pickArg: string | null;
     healthRequested: boolean;
     badgeMode: "quiet" | "verbose" | null;
+    /** User accepted free fallback after premium exhaustion (`router free`). */
+    freeAccept: boolean;
+    /** Return to premium-only routing (`router free off`). */
+    freeOff: boolean;
 }
 export declare function parseRequest(raw: ChatCompletionRequest, sessionIDHeader: string | null): ParsedRequest;
 export declare function lastUserIndex(messages: ChatMessage[]): number;

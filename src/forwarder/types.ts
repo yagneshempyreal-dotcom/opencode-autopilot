@@ -25,3 +25,11 @@ export class ForwardError extends Error {
 export function isRetriableStatus(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status < 600);
 }
+
+/** Premium pool exhausted; host should prompt for `router free` instead of retrying. */
+export class PremiumExhaustedError extends Error {
+  constructor(public attempts: Array<{ provider: string; modelID: string; status: number; reason?: string }>) {
+    super("premium pool exhausted");
+    this.name = "PremiumExhaustedError";
+  }
+}

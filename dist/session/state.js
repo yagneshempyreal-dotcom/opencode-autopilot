@@ -22,6 +22,31 @@ export function resetStickyFloor(sessionID) {
     const s = getSession(sessionID);
     s.stickyFloor = null;
 }
+export function resetSessionRouting(sessionID) {
+    const s = getSession(sessionID);
+    s.stickyFloor = null;
+    s.premiumExhausted = false;
+    s.freeModeActive = false;
+}
+export function setPremiumExhausted(sessionID, exhausted) {
+    getSession(sessionID).premiumExhausted = exhausted;
+}
+export function isPremiumExhausted(sessionID) {
+    return getSession(sessionID).premiumExhausted === true;
+}
+export function setFreeModeActive(sessionID, active) {
+    const s = getSession(sessionID);
+    s.freeModeActive = active;
+    if (active)
+        s.premiumExhausted = false;
+}
+export function isFreeModeActive(sessionID) {
+    return getSession(sessionID).freeModeActive === true;
+}
+export function isPremiumBlocked(sessionID) {
+    const s = getSession(sessionID);
+    return s.premiumExhausted === true && s.freeModeActive !== true;
+}
 export function archiveSession(sessionID) {
     const s = getSession(sessionID);
     s.archived = true;

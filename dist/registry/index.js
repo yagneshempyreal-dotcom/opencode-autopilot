@@ -91,11 +91,38 @@ export function modelsForTier(reg, tier) {
     return reg.models.filter((m) => m.tier === tier);
 }
 export function findModel(reg, modelRef) {
-    if (reg.byID.has(modelRef))
-        return reg.byID.get(modelRef) ?? null;
-    for (const m of reg.models)
-        if (m.modelID === modelRef)
-            return m;
+    const ref = modelRef.trim();
+    if (!ref)
+        return null;
+    if (reg.byID.has(ref))
+        return reg.byID.get(ref) ?? null;
+    // Bare model id (e.g. @gpt-5.4) — prefer exact id, then unique prefix match.
+    const byModelId = reg.models.filter((m) => m.modelID === ref);
+    if (byModelId.length === 1)
+        return byModelId[0] ?? null;
+    if (byModelId.length > 1) {
+        const openai = byModelId.filter((m) => m.provider === "openai");
+        if (openai.length === 1)
+            return openai[0] ?? null;
+        return byModelId[0] ?? null;
+    }
+    const prefixMatches = reg.models.filter((m) => m.modelID.startsWith(ref) || ref.startsWith(m.modelID));
+    if (prefixMatches.length === 1)
+        return prefixMatches[0] ?? null;
+    if (prefixMatches.length > 1) {
+        // Prefer openai for bare gpt-* refs; otherwise shortest model id (most specific).
+        const preferOpenai = /^gpt[-.]/i.test(ref);
+        const ranked = [...prefixMatches].sort((a, b) => {
+            if (preferOpenai) {
+                const ao = a.provider === "openai" ? 0 : 1;
+                const bo = b.provider === "openai" ? 0 : 1;
+                if (ao !== bo)
+                    return ao - bo;
+            }
+            return a.modelID.length - b.modelID.length || a.modelID.localeCompare(b.modelID);
+        });
+        return ranked[0] ?? null;
+    }
     return null;
 }
 //# sourceMappingURL=index.js.map

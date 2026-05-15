@@ -1,0 +1,49 @@
+{
+  "goal": "premium",
+  "triage": { "enabled": false },
+  "premium": {
+    "models": [
+      "openai/gpt-5.4",
+      "openai/gpt-5.1-codex-max",
+      "openai/gpt-5.4-mini-fast",
+      "openrouter/anthropic/claude-opus-4.5",
+      "openrouter/anthropic/claude-3.7-sonnet"
+    ],
+    "retriesPerModel": 3,
+    "fallbackToFree": false,
+    "freeModels": [
+      "openrouter/openrouter/free",
+      "opencode/minimax-m2.5-free",
+      "openrouter/x-ai/grok-code-fast-1"
+    ]
+  },
+  "tiers": {
+    "free": [
+      "openrouter/openrouter/free",
+      "opencode/minimax-m2.5-free",
+      "opencode/ling-2.6-flash-free"
+    ],
+    "cheap-paid": [
+      "openai/gpt-5.4-mini",
+      "openai/gpt-5.4-mini-fast",
+      "openrouter/anthropic/claude-haiku-4.5"
+    ],
+    "top-paid": [
+      "openai/gpt-5.4",
+      "openai/gpt-5.1-codex-max",
+      "openrouter/anthropic/claude-opus-4.5",
+      "openrouter/anthropic/claude-3.7-sonnet"
+    ]
+  },
+  "proxy": { "port": 4318, "host": "127.0.0.1" },
+  "ux": { "badge": true },
+  "handover": {
+    "enabled": true,
+    "thresholdWarn": 0.65,
+    "thresholdSave": 0.75,
+    "thresholdEmergency": 0.9,
+    "mode": "replace",
+    "autoResume": false,
+    "summaryModel": "policy"
+  }
+}

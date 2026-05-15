@@ -6,7 +6,9 @@ import { findModel, modelsForTier } from "../registry/index.js";
 import { parseRequest } from "./parse.js";
 import { sseLines, extractDeltaText, extractUsage, extractFinishReason } from "./sse.js";
 import { formatBadge } from "../badge/format.js";
-import { getSession, recordUsage, setStickyFloor, resetStickyFloor } from "../session/state.js";
+import { getSession, recordUsage, setStickyFloor, resetSessionRouting, setPremiumExhausted, isPremiumBlocked, setFreeModeActive, isFreeModeActive, } from "../session/state.js";
+import { PremiumExhaustedError } from "../forwarder/types.js";
+import { buildFreeCandidates, isPremiumGoal } from "../policy/premium.js";
 import { estimateRequestTokens, estimateStringTokens } from "../util/tokens.js";
 import { saveConfig } from "../config/store.js";
 import { loadEffectiveAuth } from "../config/auth.js";
@@ -33,7 +35,7 @@ export async function handleChatCompletions(req, res, ctx) {
     const parsed = parseRequest(request, sessionHeader);
     const session = getSession(parsed.sessionID);
     if (parsed.signals.reset)
-        resetStickyFloor(parsed.sessionID);
+        resetSessionRouting(parsed.sessionID);
     if (parsed.signals.autoOff)
         ctx.setAutoEnabled(false);
     if (parsed.signals.autoOn)
@@ -41,6 +43,10 @@ export async function handleChatCompletions(req, res, ctx) {
     if (parsed.signals.goalSwitch) {
         const before = ctx.config.goal;
         ctx.config.goal = parsed.signals.goalSwitch;
+        if (parsed.signals.goalSwitch === "premium") {
+            setFreeModeActive(parsed.sessionID, false);
+            setPremiumExhausted(parsed.sessionID, false);
+        }
         try {
             await saveConfig(ctx.config);
         }
@@ -48,6 +54,17 @@ export async function handleChatCompletions(req, res, ctx) {
             logger.warn("saveConfig failed after goal switch", { err: err.message });
         }
         respondInline(res, parsed.request.stream === true, formatGoalSwitchAck(before, ctx.config.goal, ctx));
+        return;
+    }
+    if (parsed.signals.freeOff) {
+        setFreeModeActive(parsed.sessionID, false);
+        setPremiumExhausted(parsed.sessionID, false);
+        respondInline(res, parsed.request.stream === true, formatFreeModeOff(ctx));
+        return;
+    }
+    if (parsed.signals.freeAccept) {
+        setFreeModeActive(parsed.sessionID, true);
+        respondInline(res, parsed.request.stream === true, formatFreeModeOn(ctx, parsed.sessionID));
         return;
     }
     if (parsed.signals.statusRequested) {
@@ -85,6 +102,13 @@ export async function handleChatCompletions(req, res, ctx) {
         fail(res, 503, "router disabled (/auto off). Re-enable with /auto on.");
         return;
     }
+    if (isPremiumGoal(ctx.config) &&
+        isPremiumBlocked(parsed.sessionID) &&
+        !parsed.override &&
+        !parsed.signals.freeAccept) {
+        respondInline(res, parsed.request.stream === true, formatPremiumExhaustedPrompt(ctx, parsed.sessionID));
+        return;
+    }
     const triageEnabled = ctx.config.triage.enabled && !!ctx.triageModel;
     const classification = await classify({
         messages: parsed.request.messages,
@@ -98,6 +122,7 @@ export async function handleChatCompletions(req, res, ctx) {
             cost: { low: "free", medium: "free", high: "cheap-paid" },
             balance: { low: "free", medium: "cheap-paid", high: "top-paid" },
             quality: { low: "cheap-paid", medium: "top-paid", high: "top-paid" },
+            premium: { low: "top-paid", medium: "top-paid", high: "top-paid" },
             custom: { low: "free", medium: "cheap-paid", high: "top-paid" },
         };
         const row = matrix[ctx.config.goal] ?? matrix.balance;
@@ -120,6 +145,10 @@ export async function handleChatCompletions(req, res, ctx) {
         health: ctx.health,
         taskTags,
     });
+    if (parsed.override && (!decision || !decision.override)) {
+        respondInline(res, parsed.request.stream === true, formatUnresolvedOverride(ctx, parsed.override.modelRef));
+        return;
+    }
     if (!decision) {
         fail(res, 503, "no model available in any tier");
         ctx.events.emit({ type: "error", sessionID: parsed.sessionID, message: "no model available" });
@@ -191,13 +220,22 @@ export async function handleChatCompletions(req, res, ctx) {
             request: parsed.request,
             registry: ctx.registry,
             auth: liveAuth,
-            allowEscalation: !parsed.override,
+            config: ctx.config,
+            // Always allow cross-tier fallback when the chosen model fails — including
+            // manual @overrides. Pinning GPT should prefer GPT, not trap the turn.
+            allowEscalation: true,
             health: ctx.health,
+            freeModeActive: isFreeModeActive(parsed.sessionID),
         });
         // Persist any health updates made during dispatch (best-effort).
         saveHealth(ctx.health).catch((e) => logger.warn("saveHealth failed", { err: e.message }));
     }
     catch (err) {
+        if (err instanceof PremiumExhaustedError) {
+            setPremiumExhausted(parsed.sessionID, true);
+            respondInline(res, parsed.request.stream === true, formatPremiumExhaustedPrompt(ctx, parsed.sessionID, err.attempts));
+            return;
+        }
         logger.error("dispatch failed", { err: err.message });
         // Returning a 5xx makes opencode retry the whole turn (3x by default),
         // burning the same dead-model cascade each time. Return 200 with a
@@ -244,7 +282,7 @@ export async function handleChatCompletions(req, res, ctx) {
             estimatedIn: estimatedTokens,
             baseRequest: parsed.request,
             decision,
-            allowEscalation: !parsed.override,
+            allowEscalation: true,
             override: parsed.override,
         });
         return;
@@ -363,8 +401,8 @@ async function streamWithContinuation(input) {
         }
         // Upstream hit output limit. Auto-continue by re-dispatching with an
         // explicit "continue" turn, while avoiding the truncating model.
-        if (hop >= MAX_CONTINUATION_HOPS || input.override) {
-            // Can't/shouldn't auto-continue when user forced a specific model.
+        if (hop >= MAX_CONTINUATION_HOPS) {
+            // Out of continuation hops — end the stream.
             if (out.finalLine) {
                 res.write(`${out.finalLine}\n`);
                 res.write("\n");
@@ -389,8 +427,10 @@ async function streamWithContinuation(input) {
             request: nextRequest,
             registry: ctx.registry,
             auth: ctx.auth,
+            config: ctx.config,
             allowEscalation: input.allowEscalation,
             health: ctx.health,
+            freeModeActive: isFreeModeActive(sessionID),
             exclude: Array.from(excluded),
         });
         currentBody = next.body;
@@ -539,7 +579,9 @@ function formatStatus(ctx) {
         `  router verify                          probe every model & save health`,
         `  router pick all-ok | <id,id,...> | clear   pin which models routing may use`,
         `  router health                          show last-known health`,
-        `  router goal cost|balance|quality       switch routing strategy`,
+        `  router goal cost|balance|quality|premium  switch routing strategy`,
+        `  router free                         use free models (after premium exhausted)`,
+        `  router free off                     return to premium-only for this session`,
     ].join("\n");
 }
 function formatModels(ctx) {
@@ -670,6 +712,89 @@ async function applyPick(ctx, arg) {
     out.push("Switch goal: `router goal cost|balance|quality`");
     out.push("Re-verify any time: `router verify`");
     return out.join("\n");
+}
+function listFreeModelLines(ctx) {
+    const pool = buildFreeCandidates(ctx.registry, ctx.config, 4096, ctx.health);
+    if (pool.length === 0)
+        return ["  · (none — add models under `tiers.free` or `premium.freeModels`)"];
+    return pool.map((m) => `  · ${m.provider}/${m.modelID}`);
+}
+function formatPremiumExhaustedPrompt(ctx, sessionID, attempts) {
+    const lines = [
+        "**router · premium models exhausted**",
+        "",
+        "All configured expert models were tried (3 attempts each) and failed.",
+        "",
+        "To continue with **free** models for this session, send:",
+        "",
+        "    router free",
+        "",
+        "That will route through every available free model until one works.",
+        "",
+        "Other options:",
+        "  · `router reset` — clear session routing and try premium again",
+        "  · `router verify` — refresh health and re-check credentials",
+        "  · `router status` — see current goal and pools",
+        "",
+        "_Free models available when you accept:_",
+        ...listFreeModelLines(ctx),
+    ];
+    if (attempts && attempts.length > 0) {
+        lines.push("");
+        lines.push("_Last failures (sample):_");
+        for (const a of attempts.slice(0, 4)) {
+            lines.push(`  · ${a.provider}/${a.modelID} (${a.status})`);
+        }
+    }
+    if (isFreeModeActive(sessionID)) {
+        lines.push("");
+        lines.push("(Free mode is already on — send your task again.)");
+    }
+    return lines.join("\n");
+}
+function formatFreeModeOn(ctx, sessionID) {
+    void sessionID;
+    const lines = [
+        "**router · free mode enabled**",
+        "",
+        "Premium goal is still active, but this session will use **free** models until you turn it off.",
+        "",
+        "Routing pool:",
+        ...listFreeModelLines(ctx),
+        "",
+        "Send your task again to continue. To return to premium-only:",
+        "",
+        "    router free off",
+    ];
+    return lines.join("\n");
+}
+function formatFreeModeOff(ctx) {
+    return [
+        "**router · free mode off**",
+        "",
+        "This session will use premium models again on the next prompt.",
+        `Current goal: \`${ctx.config.goal}\``,
+        "",
+        "If premium fails again you will be prompted before any free routing.",
+    ].join("\n");
+}
+function formatUnresolvedOverride(ctx, modelRef) {
+    const suggestions = ctx.registry.models
+        .filter((m) => m.modelID.includes(modelRef) || modelRef.includes(m.modelID))
+        .slice(0, 8)
+        .map((m) => `${m.provider}/${m.modelID}`);
+    const lines = [
+        `**router · could not resolve @${modelRef}**`,
+        "",
+        "Use `provider/modelID` (e.g. `openai/gpt-5.4-mini`). Run `router models` for the full list.",
+    ];
+    if (suggestions.length > 0) {
+        lines.push("");
+        lines.push("Did you mean:");
+        for (const id of suggestions)
+            lines.push(`  · ${id}`);
+    }
+    return lines.join("\n");
 }
 function formatExhaustedReply(ctx, decision, errMsg) {
     const records = Object.entries(ctx.health?.records ?? {});

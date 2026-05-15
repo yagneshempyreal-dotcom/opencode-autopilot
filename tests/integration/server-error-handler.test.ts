@@ -31,6 +31,7 @@ describe("proxy unhandled error catch", () => {
     let auto = true;
     const cfg: AutopilotConfig = {
       ...DEFAULT_CONFIG,
+      goal: "balance",
       triage: { enabled: false },
       proxy: { host: "127.0.0.1", port: 0 },
     };

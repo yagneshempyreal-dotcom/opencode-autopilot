@@ -28,6 +28,36 @@ export function resetStickyFloor(sessionID: string): void {
   s.stickyFloor = null;
 }
 
+export function resetSessionRouting(sessionID: string): void {
+  const s = getSession(sessionID);
+  s.stickyFloor = null;
+  s.premiumExhausted = false;
+  s.freeModeActive = false;
+}
+
+export function setPremiumExhausted(sessionID: string, exhausted: boolean): void {
+  getSession(sessionID).premiumExhausted = exhausted;
+}
+
+export function isPremiumExhausted(sessionID: string): boolean {
+  return getSession(sessionID).premiumExhausted === true;
+}
+
+export function setFreeModeActive(sessionID: string, active: boolean): void {
+  const s = getSession(sessionID);
+  s.freeModeActive = active;
+  if (active) s.premiumExhausted = false;
+}
+
+export function isFreeModeActive(sessionID: string): boolean {
+  return getSession(sessionID).freeModeActive === true;
+}
+
+export function isPremiumBlocked(sessionID: string): boolean {
+  const s = getSession(sessionID);
+  return s.premiumExhausted === true && s.freeModeActive !== true;
+}
+
 export function archiveSession(sessionID: string): void {
   const s = getSession(sessionID);
   s.archived = true;

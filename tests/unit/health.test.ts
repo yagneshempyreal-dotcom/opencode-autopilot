@@ -86,6 +86,37 @@ describe("policy.decide respects health", () => {
     expect(decision?.modelID).toBe("gpt-5.4-mini-fast");
   });
 
+  it("ignores allowlist for a tier when pin would empty that tier", () => {
+    const reg = buildRegistry({
+      auth: { openai: { type: "api", key: "k" } },
+      opencodeConfig: {
+        provider: {
+          openai: { models: { "gpt-5.4": {}, "gpt-5.4-mini": {} } },
+        },
+      },
+    });
+    const decision = decide({
+      classification: { tier: "high", confidence: 1, reason: "" },
+      config: {
+        goal: "quality",
+        tiers: { free: [], "cheap-paid": [], "top-paid": [] },
+        allowlist: ["openai/gpt-5.4-mini"],
+        proxy: { port: 4317, host: "127.0.0.1" },
+        ux: { badge: false },
+        triage: { enabled: false },
+        handover: {
+          enabled: false, thresholdWarn: 0.7, thresholdSave: 0.8, thresholdEmergency: 0.9,
+          mode: "replace", autoResume: false, summaryModel: "policy",
+        },
+      },
+      registry: reg,
+      stickyFloor: null,
+      override: null,
+      estimatedTokens: 1000,
+    });
+    expect(decision?.modelID).toBe("gpt-5.4");
+  });
+
   it("respects allowlist — only pinned models are eligible", () => {
     const reg = buildRegistry({
       auth: { openai: { type: "api", key: "k" }, deepseek: { type: "api", key: "k" } },

@@ -6,7 +6,7 @@ export async function classify(input) {
     const floor = input.confidenceFloor ?? 0.7;
     if (heur.confidence >= floor)
         return heur;
-    if (input.goal === "quality")
+    if (input.goal === "quality" || input.goal === "premium")
         return heur;
     if (!input.triageEnabled || !input.triageModel)
         return heur;

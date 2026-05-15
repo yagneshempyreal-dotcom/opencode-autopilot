@@ -75,7 +75,7 @@ Auth:   ${AUTH_PATH}
 }
 async function runInit() {
     console.log("opencode-openauto — first-run setup\n");
-    const goal = (await askChoice("What is your primary optimization goal?", ["cost", "quality", "balance", "custom"], 2));
+    const goal = (await askChoice("What is your primary optimization goal?", ["cost", "quality", "balance", "premium", "custom"], 2));
     console.log("\nScanning available models from opencode auth, config, and recent state…");
     const auth = await loadAuth();
     const opencodeCfg = await loadOpencodeConfig();
@@ -422,7 +422,7 @@ text — no leading "/" or "!" since opencode TUI captures those:
   router pick clear              remove the pin (use full registry)
   router health                  show last-known per-model health
   router status                  goal + health + matrix summary
-  router goal cost|balance|quality   switch routing strategy
+  router goal cost|balance|quality|premium   switch routing strategy
   router models                  list models per tier
   router upgrade / router reset  bump / reset session sticky floor
   router auto on / router auto off   enable / disable router

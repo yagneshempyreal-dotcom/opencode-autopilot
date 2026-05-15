@@ -11,7 +11,7 @@ const OVERRIDE_RE = /(?:^|\s)@([\w./:-]+)\b/;
 const ROUTER_PREFIX = "^\\s*[#:>/]?\\s*router";
 const SLASH_RESET_RE = new RegExp(`${ROUTER_PREFIX}\\s+reset\\b`, "i");
 const SLASH_RESUME_RE = new RegExp(`${ROUTER_PREFIX}\\s+resume\\b`, "i");
-const SLASH_GOAL_RE = new RegExp(`${ROUTER_PREFIX}\\s+goal\\s+(cost|balance|quality)\\b`, "i");
+const SLASH_GOAL_RE = new RegExp(`${ROUTER_PREFIX}\\s+goal\\s+(cost|balance|quality|premium)\\b`, "i");
 const SLASH_STATUS_RE = new RegExp(`${ROUTER_PREFIX}\\s+status\\b`, "i");
 const SLASH_MODELS_RE = new RegExp(`${ROUTER_PREFIX}\\s+models\\b`, "i");
 const SLASH_VERIFY_RE = new RegExp(`${ROUTER_PREFIX}\\s+verify\\b`, "i");
@@ -20,6 +20,8 @@ const SLASH_QUIET_RE = new RegExp(`${ROUTER_PREFIX}\\s+quiet\\b`, "i");
 const SLASH_VERBOSE_RE = new RegExp(`${ROUTER_PREFIX}\\s+verbose\\b`, "i");
 // "router pick all-ok" | "router pick clear" | "router pick a/b, c/d, ..."
 const SLASH_PICK_RE = new RegExp(`${ROUTER_PREFIX}\\s+pick\\s+(.+)$`, "i");
+const SLASH_FREE_ON_RE = new RegExp(`${ROUTER_PREFIX}\\s+free(?:\\s+(?:on|accept|yes))?\\b`, "i");
+const SLASH_FREE_OFF_RE = new RegExp(`${ROUTER_PREFIX}\\s+free\\s+off\\b`, "i");
 // Upgrade / auto kept under the router umbrella too. Legacy "/upgrade" and
 // "/auto on|off" still match anywhere in message (whitespace-preceded) since
 // "/" is unambiguous; new bare "router upgrade" form is anchored to start.
@@ -51,6 +53,8 @@ export function parseRequest(raw, sessionIDHeader) {
         pickArg: null,
         healthRequested: false,
         badgeMode: null,
+        freeAccept: false,
+        freeOff: false,
     };
     if (lastUser >= 0) {
         const msg = messages[lastUser];
@@ -89,6 +93,10 @@ export function parseRequest(raw, sessionIDHeader) {
             const pickMatch = SLASH_PICK_RE.exec(txt);
             if (pickMatch && pickMatch[1])
                 signals.pickArg = pickMatch[1].trim();
+            if (SLASH_FREE_OFF_RE.test(txt))
+                signals.freeOff = true;
+            else if (SLASH_FREE_ON_RE.test(txt))
+                signals.freeAccept = true;
             if (!signals.upgradeRequested) {
                 for (const re of UPGRADE_PHRASES)
                     if (re.test(txt)) {

@@ -1,5 +1,5 @@
 export type Tier = "free" | "cheap-paid" | "top-paid";
-export type Goal = "cost" | "quality" | "balance" | "custom";
+export type Goal = "cost" | "quality" | "balance" | "custom" | "premium";
 export type Complexity = "low" | "medium" | "high";
 export type Tag = "code" | "reasoning" | "math" | "vision" | "fast" | "long-ctx" | "chat";
 export interface ModelEntry {
@@ -17,6 +17,7 @@ export interface AutopilotConfig {
     customMapping?: Record<Complexity, string>;
     tiers: Record<Tier, string[]>;
     allowlist?: string[];
+    premium?: PremiumConfig;
     proxy: {
         port: number;
         host: string;
@@ -28,6 +29,16 @@ export interface AutopilotConfig {
         enabled: boolean;
     };
     handover: HandoverConfig;
+}
+export interface PremiumConfig {
+    /** Explicit provider/modelID list. Defaults to tiers top-paid + cheap-paid. */
+    models?: string[];
+    /** Per-model attempts before moving to the next premium candidate. Default 3. */
+    retriesPerModel?: number;
+    /** If true, auto-fallback to free without prompting (legacy). Default false. */
+    fallbackToFree?: boolean;
+    /** Free models to use on fallback. Defaults to tiers.free or registry free tier. */
+    freeModels?: string[];
 }
 export interface HandoverConfig {
     enabled: boolean;
@@ -47,6 +58,10 @@ export interface SessionState {
     lastModel?: string;
     archived: boolean;
     resumedFrom?: string;
+    /** Premium pool failed; awaiting `router free` before using free models. */
+    premiumExhausted?: boolean;
+    /** User accepted free mode for this session (premium goal unchanged). */
+    freeModeActive?: boolean;
 }
 export interface ClassifierResult {
     tier: Complexity;

@@ -82,7 +82,7 @@ async function runInit(): Promise<void> {
 
   const goal = (await askChoice<Goal>(
     "What is your primary optimization goal?",
-    ["cost", "quality", "balance", "custom"],
+    ["cost", "quality", "balance", "premium", "custom"],
     2,
   )) as Goal;
 
@@ -445,7 +445,7 @@ text — no leading "/" or "!" since opencode TUI captures those:
   router pick clear              remove the pin (use full registry)
   router health                  show last-known per-model health
   router status                  goal + health + matrix summary
-  router goal cost|balance|quality   switch routing strategy
+  router goal cost|balance|quality|premium   switch routing strategy
   router models                  list models per tier
   router upgrade / router reset  bump / reset session sticky floor
   router auto on / router auto off   enable / disable router

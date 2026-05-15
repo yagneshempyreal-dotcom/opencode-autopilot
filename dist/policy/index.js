@@ -1,10 +1,12 @@
 import { TIER_RANK } from "../types.js";
 import { findModel, modelsForTier } from "../registry/index.js";
 import { emptyStore, isHealthy, key as healthKey } from "../registry/health.js";
+import { isPremiumGoal, buildPremiumCandidates, } from "./premium.js";
 export const GOAL_MATRIX = {
     cost: { low: "free", medium: "free", high: "cheap-paid" },
     balance: { low: "free", medium: "cheap-paid", high: "top-paid" },
     quality: { low: "cheap-paid", medium: "top-paid", high: "top-paid" },
+    premium: { low: "top-paid", medium: "top-paid", high: "top-paid" },
     custom: { low: "free", medium: "cheap-paid", high: "top-paid" },
 };
 export const TIER_ESCALATION = ["free", "cheap-paid", "top-paid"];
@@ -22,10 +24,25 @@ export function decide(input) {
             };
         }
     }
+    const health = input.health ?? emptyStore();
+    if (isPremiumGoal(input.config)) {
+        const pool = buildPremiumCandidates(input.registry, input.config, input.estimatedTokens, health, input.taskTags ?? []);
+        const ranked = rankByTags(pool, input.taskTags ?? []);
+        const chosen = ranked[0];
+        if (!chosen)
+            return null;
+        return {
+            modelID: chosen.modelID,
+            provider: chosen.provider,
+            tier: chosen.tier,
+            reason: `premium → ${chosen.provider}/${chosen.modelID}`,
+            escalated: false,
+            override: false,
+        };
+    }
     const goalTier = GOAL_MATRIX[input.config.goal][input.classification.tier];
     const effective = maxTier(goalTier, input.stickyFloor);
     const ladder = tierLadder(effective);
-    const health = input.health ?? emptyStore();
     let escalated = false;
     for (const tier of ladder) {
         const raw = pickCandidates(input.registry, input.config, tier, input.estimatedTokens, health);
@@ -82,12 +99,16 @@ function pickCandidates(registry, config, tier, estimatedTokens, health = emptyS
         .map((id) => findModel(registry, id))
         .filter((m) => m !== null);
     let pool = explicitResolved.length > 0 ? explicitResolved : modelsForTier(registry, tier);
-    // User-pinned allowlist takes precedence — only models the user picked
-    // are considered, regardless of detection.
+    // User-pinned allowlist — only models the user picked are considered.
+    // If the pin would empty this tier (common when auto-verify pinned only
+    // cheap models but goal=quality wants top-paid), ignore it for this tier
+    // so routing can still escalate meaningfully instead of 503'ing.
     const allow = config.allowlist;
     if (allow && allow.length > 0) {
         const allowSet = new Set(allow);
-        pool = pool.filter((m) => allowSet.has(`${m.provider}/${m.modelID}`));
+        const pinned = pool.filter((m) => allowSet.has(`${m.provider}/${m.modelID}`));
+        if (pinned.length > 0)
+            pool = pinned;
     }
     // Context-window fit.
     pool = pool.filter((m) => m.ctxWindow >= Math.max(estimatedTokens + 1024, 4096));

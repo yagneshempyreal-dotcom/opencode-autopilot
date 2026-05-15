@@ -17,7 +17,7 @@ export async function classify(input: ClassifyInput): Promise<ClassifierResult> 
 
   const floor = input.confidenceFloor ?? 0.7;
   if (heur.confidence >= floor) return heur;
-  if (input.goal === "quality") return heur;
+  if (input.goal === "quality" || input.goal === "premium") return heur;
   if (!input.triageEnabled || !input.triageModel) return heur;
   if (heuristicInput.prompt.length < 20) return heur;
 

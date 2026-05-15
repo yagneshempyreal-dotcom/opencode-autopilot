@@ -5,8 +5,12 @@ import { autopilotConfigPath } from "../util/paths.js";
 import { DEFAULT_PORT } from "../types.js";
 export const CONFIG_PATH = autopilotConfigPath();
 export const DEFAULT_CONFIG = {
-    goal: "balance",
+    goal: "premium",
     tiers: { free: [], "cheap-paid": [], "top-paid": [] },
+    premium: {
+        retriesPerModel: 3,
+        fallbackToFree: false,
+    },
     proxy: { port: DEFAULT_PORT, host: "127.0.0.1" },
     ux: { badge: true },
     triage: { enabled: true },
@@ -63,6 +67,7 @@ function mergeWithDefaults(partial) {
         ux: { ...DEFAULT_CONFIG.ux, ...(partial.ux ?? {}) },
         triage: { ...DEFAULT_CONFIG.triage, ...(partial.triage ?? {}) },
         handover: { ...DEFAULT_CONFIG.handover, ...(partial.handover ?? {}) },
+        premium: { ...DEFAULT_CONFIG.premium, ...(partial.premium ?? {}) },
     };
 }
 //# sourceMappingURL=store.js.map
